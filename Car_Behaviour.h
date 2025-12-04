@@ -69,6 +69,15 @@ extern void UpdateDamage (void);
 extern void ResetLapData (long car);
 extern void UpdateLapData (void);
 
+// Lap timing variables (using game ticks)
+extern long raceStartTick[];
+extern long lapStartTick[];
+extern double lastLapTime[];
+extern double totalRaceTime[];
+
+// Helper function to get current game tick
+extern long GetCurrentGameTick();
+
 #ifdef USE_AMIGA_RECORDING
 extern void RequestGameReplay (void);
 extern void RequestStoredReplay (void);

@@ -43,6 +43,16 @@
 #define DEFAULT_FRAME_GAP	(4)
 #endif
 
+// Game timing notes:
+// - Original Amiga PAL: 50Hz / 6 frame gap = 8.333 updates/sec (0.12 sec/tick)
+// - NTSC standard: 60Hz / 8 frame gap = 7.5 updates/sec (0.1333 sec/tick)
+// - Windows default: 60Hz / 4 frame gap = 15 game logic updates per second
+// - Lap timing uses game tick counter (globalGameTicks) instead of wall clock time
+// - Each game tick represents one game logic update (independent of frame rate)
+// - Conversion: 1 tick = 0.1333 seconds (based on NTSC timing for better game physics)
+// - This makes lap times accurate and consistent regardless of frameGap setting
+// - Users can adjust frameGap with F9/F10 keys to speed up or slow down gameplay
+
 #define	HEIGHT_ABOVE_ROAD	(100)
 
 #define	FURTHEST_Z (131072.0f)
@@ -74,6 +84,7 @@ bool bNewGame = FALSE;
 bool bPaused = FALSE;
 bool bPlayerPaused = FALSE;
 bool bOpponentPaused = FALSE;
+static bool bPrevPaused = FALSE;
 long bTrackDrawMode = 0;
 bool bOutsideView = FALSE;
 long engineSoundPlaying = FALSE;
@@ -509,6 +520,31 @@ float GetTextScale()
 	float base_width = wideScreen ? static_cast<float>(BASE_WIDTH_WIDESCREEN) : static_cast<float>(BASE_WIDTH_STANDARD);
 	return static_cast<float>(current_width) / base_width;
 }
+
+/*	======================================================================================= */
+/*	Function:		FormatLapTime																	*/
+/*																										*/
+/*	Description:	Format lap time in seconds to mm:ss.ss string							*/
+/*																										*/
+/*	Returns:		Formatted time string in provided buffer									*/
+/*	======================================================================================= */
+
+void FormatLapTime(double timeInSeconds, WCHAR* buffer, size_t bufferSize)
+{
+	if (timeInSeconds <= 0.0)
+	{
+		StringCchPrintf(buffer, bufferSize, L"--:--.--");
+		return;
+	}
+	
+	int totalCentiseconds = static_cast<int>(timeInSeconds * 100.0);
+	int minutes = totalCentiseconds / 6000;
+	int seconds = (totalCentiseconds % 6000) / 100;
+	int centiseconds = totalCentiseconds % 100;
+	
+	StringCchPrintf(buffer, bufferSize, L"%02d:%02d.%02d", minutes, seconds, centiseconds);
+}
+
 ID3DXSprite *g_pSprite = NULL;       // Sprite for batching draw text calls
 #endif
 
@@ -971,6 +1007,15 @@ static void StopEngineSound( void )
 }
 
 
+// Global game tick counter (increments once per game logic update)
+static long globalGameTicks = 0;
+
+// Helper function to access game tick counter from other modules
+long GetCurrentGameTick()
+{
+	return globalGameTicks;
+}
+
 void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fElapsedTime, void *pUserContext )
 {
 static D3DXVECTOR3 vUpVec( 0.0f, 1.0f, 0.0f );
@@ -996,10 +1041,24 @@ static float lastFrame = 0.0f;
 		return;
 	}
 
-	if (bPaused)
+	// Handle pause state changes
+	if (bPaused && !bPrevPaused)
 	{
+		// Just paused - nothing to do with tick-based timing
 		StopEngineSound();
 	}
+	else if (!bPaused && bPrevPaused)
+	{
+		// Just unpaused - nothing to do with tick-based timing
+	}
+	else if (bPaused)
+	{
+		// Still paused - keep engine stopped
+		StopEngineSound();
+	}
+	
+	// Update previous pause state
+	bPrevPaused = bPaused;
 
 	if (TrackID == NO_TRACK)
 		return;
@@ -1019,6 +1078,9 @@ static float lastFrame = 0.0f;
 		if (frameCount == 0)
 		{
 			frameCount = frameGap;
+			// Increment game tick counter (game logic updates once per frameGap frames)
+			if (!bPaused)
+				globalGameTicks++;
 			//DXUTPause( false, false );	//pausing doesn't work properly
 		}
 		else
@@ -1278,7 +1340,7 @@ static void HandleTrackPreview( CDXUTTextHelper &txtHelper )
 	#if defined(PANDORA) || defined(PYRA)
 	txtHelper.DrawTextLine( L"  DPad = Steer, (X) = Accelerate, (B) = Brake, (R) = Nitro" );
 	#else
-	txtHelper.DrawTextLine( L"  Arrow left = Steer left, Arrow right = Steer right, Space = Accelerate, Arrow Down = Brake" );
+	txtHelper.DrawTextLine( L"  Arrow left = Steer left, Arrow right = Steer right, Space = Accelerate, Arrow down = Brake" );
 	#endif
 	txtHelper.DrawTextLine( L"  R = Point car in opposite direction, P = Pause, O = Unpause" );
 	txtHelper.DrawTextLine( L"  M = Back to track menu, Escape = Quit" );
@@ -1390,10 +1452,48 @@ void RenderText( double fTime )
 		float scaleY = static_cast<float>(pd3dsdBackBuffer->Height) / base_height;
 		
 		// Boost text - positioned in top dashboard box
-		txtHelper.SetInsertionPos( static_cast<int>((88+(wideScreen?80:0)) * textScale), static_cast<int>((BASE_HEIGHT - 48.0f) * scaleY) );
+		txtHelper.SetInsertionPos( static_cast<int>((DASHBOARD_TEXT_X_BASE+(wideScreen?80:0)) * textScale), static_cast<int>((BASE_HEIGHT - DASHBOARD_TEXT_Y_TOP) * scaleY) );
 		txtHelper.DrawFormattedTextLine( L"L" STRING L"       B%02d", lapText, boostReserve );			// Distance text - positioned in bottom dashboard box
-			txtHelper.SetInsertionPos( static_cast<int>((84+(wideScreen?80:0)) * textScale), static_cast<int>((BASE_HEIGHT - 25.0f) * scaleY) );
+			txtHelper.SetInsertionPos( static_cast<int>((DASHBOARD_TEXT_X_DISTANCE+(wideScreen?80:0)) * textScale), static_cast<int>((BASE_HEIGHT - DASHBOARD_TEXT_Y_BOTTOM) * scaleY) );
 			txtHelper.DrawFormattedTextLine( L"        %+05d", CalculateOpponentsDistance() );
+
+			// Lap timers - positioned in right and bottom gray cockpit areas
+			WCHAR currentLapStr[16], lastLapStr[16];
+			
+			// Calculate current lap time using game ticks
+			double currentLapElapsed = 0.0;
+			if (raceFinished)
+			{
+				// Show total race time when race is finished
+				currentLapElapsed = totalRaceTime[PLAYER];
+			}
+			else if (lapStartTick[PLAYER] > 0)
+			{
+				// Convert current lap ticks to seconds
+				long currentLapTicks = globalGameTicks - lapStartTick[PLAYER];
+				currentLapElapsed = currentLapTicks * SECONDS_PER_GAME_TICK;
+			}
+			
+			// Format the times
+			FormatLapTime(currentLapElapsed, currentLapStr, 16);
+			FormatLapTime(lastLapTime[PLAYER], lastLapStr, 16);
+			
+			// Current lap/race time - right gray area
+			txtHelper.SetInsertionPos( static_cast<int>((DASHBOARD_TEXT_X_TIMERS+(wideScreen?80:0)) * textScale), static_cast<int>((BASE_HEIGHT - DASHBOARD_TEXT_Y_TOP) * scaleY) );
+			if (raceFinished)
+				txtHelper.DrawFormattedTextLine( L"R %s", currentLapStr );
+			else
+				txtHelper.DrawFormattedTextLine( L"C %s", currentLapStr );
+			
+			// Last lap time - bottom gray area (positioned to right of distance display)
+			txtHelper.SetInsertionPos( static_cast<int>((DASHBOARD_TEXT_X_TIMERS+(wideScreen?80:0)) * textScale), static_cast<int>((BASE_HEIGHT - DASHBOARD_TEXT_Y_BOTTOM) * scaleY) );
+			txtHelper.DrawFormattedTextLine( L"L %s", lastLapStr );
+			
+#if defined(DEBUG) || defined(_DEBUG)
+			// FrameGap indicator - top right corner (debug only)
+			txtHelper.SetInsertionPos( static_cast<int>((pd3dsdBackBuffer->Width - 80 * textScale)), static_cast<int>(10 * textScale) );
+			txtHelper.DrawFormattedTextLine( L"FG:%d", frameGap );
+#endif
 
 			txtHelper.End();
 
@@ -1731,6 +1831,11 @@ void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUse
 				GameMode = TRACK_MENU;
 
 				opponentsID = NO_OPPONENT;
+
+				// Reset pause state when returning to menu
+				bPaused = FALSE;
+				bPlayerPaused = FALSE;
+				bOpponentPaused = FALSE;
 
 				// reset all animated objects
 				ResetDrawBridge();

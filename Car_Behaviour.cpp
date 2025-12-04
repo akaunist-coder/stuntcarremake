@@ -4142,11 +4142,23 @@ bool raceFinished, raceWon;
 long lapNumber[NUM_CARS];
 static bool carOnFirstHalfOfLap[NUM_CARS] = {false, false};
 
+// Lap timing variables (using game ticks instead of wall clock time)
+long raceStartTick[NUM_CARS] = {0, 0};		// Game tick when race started (lap 1)
+long lapStartTick[NUM_CARS] = {0, 0};		// Game tick when current lap started
+double lastLapTime[NUM_CARS] = {0.0, 0.0};	// Previous completed lap time in seconds
+double totalRaceTime[NUM_CARS] = {0.0, 0.0};// Total time for entire race in seconds
+long pauseStartTick = 0;					// Game tick when pause started
+
 void ResetLapData (long car)
 {
 	raceFinished = raceWon = FALSE;
 	lapNumber[car] = 0;
 	carOnFirstHalfOfLap[car] = false;
+	raceStartTick[car] = 0;
+	lapStartTick[car] = 0;
+	lastLapTime[car] = 0.0;
+	totalRaceTime[car] = 0.0;
+	pauseStartTick = 0;
 }
 
 void UpdateLapData (void)
@@ -4166,6 +4178,24 @@ void UpdateLapData (void)
 		{
 			carOnFirstHalfOfLap[car] = true;
 			++lapNumber[car];
+			
+			// Track lap timing using game ticks
+			extern long GetCurrentGameTick();
+			long currentTick = GetCurrentGameTick();
+			if (lapStartTick[car] > 0)
+			{
+				// Completed a lap - convert ticks to seconds
+				long lapTicks = currentTick - lapStartTick[car];
+				lastLapTime[car] = lapTicks * SECONDS_PER_GAME_TICK;
+			}
+			// Start timing new lap
+			lapStartTick[car] = currentTick;
+			
+			// On first lap, save race start tick
+			if (lapNumber[car] == 1)
+			{
+				raceStartTick[car] = currentTick;
+			}
 		}
 	}
 
@@ -4179,6 +4209,14 @@ void UpdateLapData (void)
 			if (lapNumber[car] == LAP_THAT_FINISHES_RACE)
 			{
 				raceFinished = true;
+				
+				// Save total race time when finishing (convert ticks to seconds)
+				extern long GetCurrentGameTick();
+				if (raceStartTick[car] > 0)
+				{
+					long raceTicks = GetCurrentGameTick() - raceStartTick[car];
+					totalRaceTime[car] = raceTicks * SECONDS_PER_GAME_TICK;
+				}
 
 				// frames to show message for = 44; about 5.64 seconds
 

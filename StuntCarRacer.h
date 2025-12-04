@@ -7,10 +7,20 @@
 /*	========= */
 #define SCR_BASE_COLOUR	26
 
+// Game timing constant
+#define SECONDS_PER_GAME_TICK (0.1333)  // Based on NTSC timing: 60Hz / 8 frames = 7.5 updates/sec, so 1/7.5 = 0.1333 sec/tick
+
 // Screen resolution constants
 #define BASE_WIDTH_STANDARD		640		// Standard 4:3 base width
 #define BASE_WIDTH_WIDESCREEN	800		// Widescreen 16:10 base width
 #define BASE_HEIGHT				480		// Base height for both modes
+
+// Dashboard text position constants (in base 640x480/800x480 coordinate space)
+#define DASHBOARD_TEXT_X_BASE		88		// Base X position for lap/boost text
+#define DASHBOARD_TEXT_X_DISTANCE	84		// Base X position for distance text
+#define DASHBOARD_TEXT_X_TIMERS		480		// Base X position for lap timers
+#define DASHBOARD_TEXT_Y_TOP		50.0f	// Y offset from bottom for top row (lap/boost/current time)
+#define DASHBOARD_TEXT_Y_BOTTOM		25.0f	// Y offset from bottom for bottom row (distance/last lap)
 
 typedef enum
 	{
