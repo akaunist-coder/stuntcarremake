@@ -37,6 +37,14 @@
 // Defines, constants, and global variables
 //-----------------------------------------------------------------------------
 
+// Frame interpolation mode:
+// When enabled, provides smooth 60 FPS rendering while maintaining game logic at lower update rate
+// - Uses quaternion-based (SLERP) interpolation for smooth camera movement
+// - Separates rendering frame rate from game logic tick rate
+// - Game timing remains accurate (based on globalGameTicks, not wall clock)
+// Comment out the following line to disable frame interpolation and use classic frame-skipping mode
+#define SMOOTH
+
 #ifdef linux
 #define DEFAULT_FRAME_GAP	(6)		// 4 Used to limit frame rate.  Amiga StuntCarRacer uses value of 6 (called MIN.FRAMES)
 #else
@@ -952,8 +960,51 @@ long x_offset, y_offset, z_offset;
 //--------------------------------------------------------------------------------------
 // Handle updates to the scene
 //--------------------------------------------------------------------------------------
-static D3DXMATRIX matWorldTrack, matWorldCar, matWorldOpponentsCar;
+#ifdef SMOOTH
+struct MTXInterpolator
+{
+	D3DXMATRIX oldMatTrans, newMatTrans;
+	D3DXQUATERNION oldQuatRot, newQuatRot;
 
+	void UpdateMatrices(const D3DMATRIX& newTrans, const D3DMATRIX& newRot)
+	{
+		oldMatTrans = newMatTrans;
+		oldQuatRot = newQuatRot;
+
+		newMatTrans = newTrans;
+		D3DXMATRIX newRotX = newRot;
+		D3DXQuaternionRotationMatrix(&newQuatRot, &newRotX);
+	}
+
+	D3DXMATRIX CreateInterpolatedMtx(float f, bool view = false)
+	{
+		D3DXMATRIX result;
+		D3DXMATRIX trans = oldMatTrans + f * (newMatTrans - oldMatTrans);
+
+		D3DXQUATERNION rotQ;
+		D3DXQuaternionSlerp(&rotQ, &oldQuatRot, &newQuatRot, f);
+		D3DXMATRIX rot;
+		D3DXMatrixRotationQuaternion(&rot, &rotQ);
+
+		if (view)
+			D3DXMatrixMultiply(&result, &trans, &rot);
+		else
+			D3DXMatrixMultiply(&result, &rot, &trans);
+		return result;
+	}
+};
+
+
+MTXInterpolator InterpolatorView;
+MTXInterpolator InterpolatorCarOwn;
+MTXInterpolator InterpolatorCarOpponent;
+
+
+
+static D3DXMATRIX matWorldTrack;
+#else
+static D3DXMATRIX matWorldTrack, matWorldCar, matWorldOpponentsCar;
+#endif
 
 static void SetCarWorldTransform( void )
 {
@@ -974,9 +1025,13 @@ D3DXMATRIX matRot, matTemp, matTrans;
 	// Position car slightly higher than wheel height (VCAR_HEIGHT/4) so wheels are fully visible
 	D3DXMatrixTranslation( &matTrans, static_cast<float>(player1_x>>LOG_PRECISION), static_cast<float>(-player1_y>>LOG_PRECISION)+VCAR_HEIGHT/3, static_cast<float>(player1_z>>LOG_PRECISION) );
 	// Combine the rotation and translation matrices to complete the world matrix
+#ifdef SMOOTH
+	InterpolatorCarOwn.UpdateMatrices(matTrans, matRot);
+#else
 	D3DXMatrixMultiply(&matWorldCar, &matRot, &matTrans);
+#endif
+	
 }
-
 
 static void SetOpponentsCarWorldTransform( void )
 {
@@ -997,7 +1052,11 @@ D3DXMATRIX matRot, matTemp, matTrans;
 	// Position car at wheel height (VCAR_HEIGHT/4)
 	D3DXMatrixTranslation( &matTrans, static_cast<float>(opponent_x>>LOG_PRECISION), static_cast<float>(-opponent_y>>LOG_PRECISION)+VCAR_HEIGHT/4, static_cast<float>(opponent_z>>LOG_PRECISION) );
 	// Combine the rotation and translation matrices to complete the world matrix
+#ifdef SMOOTH
+	InterpolatorCarOpponent.UpdateMatrices(matTrans, matRot);
+#else
 	D3DXMatrixMultiply(&matWorldOpponentsCar, &matRot, &matTrans);
+#endif
 }
 
 
@@ -1021,6 +1080,48 @@ long GetCurrentGameTick()
 {
 	return globalGameTicks;
 }
+
+#ifdef SMOOTH
+struct Ticker
+{
+	Ticker(float newFPS)
+	{
+		SetTargetFPS(newFPS);
+	}
+
+	void SetTargetFPS(float newFPS)
+	{
+		TargetFPS = newFPS;
+		TickDuration = 1.0f / TargetFPS;
+		TickFraction = 0.0f;
+		TickPercent = 0.0f;
+		DoFrame = true;
+	}
+
+	void Update(float elapsedSeconds)
+	{
+		TickFraction += elapsedSeconds;
+
+		float fullFrames = TickFraction / TickDuration;
+		DoFrame = fullFrames >= 1.0f;
+
+		if (DoFrame)
+			TickFraction -= TickDuration;
+
+		TickPercent = TickFraction / TickDuration;
+	}
+
+	float TargetFPS;
+	float TickDuration;
+	float TickFraction;
+	float TickPercent;
+	bool  DoFrame;
+};
+
+
+Ticker GameTicker(10.0f);
+Ticker SoundTicker(50.0f);
+#endif
 
 void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fElapsedTime, void *pUserContext )
 {
@@ -1072,28 +1173,66 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 	// Track preview and game mode run at reduced frame rate
 	if ((GameMode == TRACK_PREVIEW) || (GameMode == GAME_IN_PROGRESS))
 	{
+#ifdef SMOOTH
+		GameTicker.Update(fElapsedTime);
+		SoundTicker.Update(fElapsedTime);
+#endif
 		if (GameMode == GAME_IN_PROGRESS)
 		{
 			// Following function should run at 50Hz
+#ifdef SMOOTH
+			if (!bPaused && SoundTicker.DoFrame) FramesWheelsEngine(EngineSoundBuffers);
+#else
 			if (!bPaused) FramesWheelsEngine(EngineSoundBuffers);
+#endif
 		}
 
+#ifdef SMOOTH
+		if (!GameTicker.DoFrame)
+		{
+			if (GameMode == GAME_IN_PROGRESS)
+			{
+				D3DMATRIX viewMtx = InterpolatorView.CreateInterpolatedMtx(GameTicker.TickPercent, true);
+				pd3dDevice->SetTransform(D3DTS_VIEW, &viewMtx);
+			}
+			return;  // Early return for interpolation frames (no game logic)
+		}
+
+		// Increment game tick counter when game logic runs (every GameTicker.DoFrame)
+		if (!bPaused)
+			globalGameTicks++;
+
+		if (GameMode == TRACK_PREVIEW)
+		{
+			//
+			// Set the view transform matrix
+			//
+			// Set the eye point
+			D3DXVECTOR3 vEyePt((float)viewpoint1_x, (float)(-viewpoint1_y >> LOG_PRECISION), (float)viewpoint1_z);
+			// Set the lookat point
+			D3DXMATRIX carMtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
+			D3DXVECTOR3 vLookatPt(carMtx._41, carMtx._42, carMtx._43);
+			D3DXMatrixLookAtLH(&matView, &vEyePt, &vLookatPt, &vUpVec);
+
+			pd3dDevice->SetTransform(D3DTS_VIEW, &matView);
+		}
+#else
 		if (frameCount > 0)
 			--frameCount;
 
 		if (frameCount == 0)
 		{
 			frameCount = frameGap;
+
 			// Increment game tick counter (game logic updates once per frameGap frames)
 			if (!bPaused)
 				globalGameTicks++;
-			//DXUTPause( false, false );	//pausing doesn't work properly
 		}
 		else
 		{
-			//if (frameCount == frameGap-1) DXUTPause( true, true );	//pausing doesn't work properly
 			return;
 		}
+#endif
 	}
 	else if (GameMode == TRACK_MENU)
 	{
@@ -1170,7 +1309,24 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 		// Set the eye point
 		D3DXVECTOR3 vEyePt( static_cast<float>(viewpoint1_x), static_cast<float>(-viewpoint1_y>>LOG_PRECISION), static_cast<float>(viewpoint1_z) );
 		// Set the lookat point
+#ifdef SMOOTH
+		D3DXVECTOR3 vLookatPt;
+		if (GameMode == TRACK_MENU)
+		{
+			vLookatPt.x = (float)target_x;
+			vLookatPt.y = (float)target_y;
+			vLookatPt.z = (float)target_z;
+		}
+		else
+		{
+			D3DXMATRIX carMtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
+			vLookatPt.x = carMtx._41;
+			vLookatPt.y = carMtx._42;
+			vLookatPt.z = carMtx._43;
+		}
+#else
 		D3DXVECTOR3 vLookatPt( static_cast<float>(target_x), static_cast<float>(target_y), static_cast<float>(target_z) );
+#endif
 		D3DXMatrixLookAtLH( &matView, &vEyePt, &vLookatPt, &vUpVec );
 		pd3dDevice->SetTransform( D3DTS_VIEW, &matView );
 	}
@@ -1233,12 +1389,24 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 		D3DXMatrixMultiply(&matRot, &matRot, &matTemp);
 #endif
 		// Combine the rotation and translation matrices to complete the world matrix
+#ifdef SMOOTH
+		// update matrices for interpolation
+		InterpolatorView.UpdateMatrices(matTrans, matRot);
+
+		//D3DXMatrixMultiply(&matView, &matTrans, &matRot);
+		D3DMATRIX viewMtx = InterpolatorView.CreateInterpolatedMtx(GameTicker.TickPercent, true);
+#else
 		D3DXMatrixMultiply(&matView, &matTrans, &matRot);
+#endif
 #ifdef linux
 		D3DXMatrixScaling(&matTrans, +1, -1, +1);
 		D3DXMatrixMultiply(&matView, &matView, &matTrans);
 #endif
+#ifdef SMOOTH
+		pd3dDevice->SetTransform(D3DTS_VIEW, &viewMtx);
+#else
 		pd3dDevice->SetTransform( D3DTS_VIEW, &matView );
+#endif
 	}
 
 	if (!bPaused)
@@ -1665,8 +1833,11 @@ void CALLBACK OnFrameRender( IDirect3DDevice9 *pd3dDevice, double fTime, float f
 //    V( pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_ARGB(0, 45, 50, 170), 1.0f, 0) );
 
     // Clear the zbuffer
+#ifdef SMOOTH
+	V(pd3dDevice->Clear(0, NULL, D3DCLEAR_ZBUFFER | D3DCLEAR_TARGET, 0xff444488, 1.0f, 0));
+#else
     V( pd3dDevice->Clear(0, NULL, D3DCLEAR_ZBUFFER, 0, 1.0f, 0) );
-
+#endif
     // Render the scene
     if ( SUCCEEDED( pd3dDevice->BeginScene() ) )
     {
@@ -1689,21 +1860,39 @@ void CALLBACK OnFrameRender( IDirect3DDevice9 *pd3dDevice, double fTime, float f
 				break;
 
 			case TRACK_PREVIEW:
+			{
 				// Draw Opponent's Car
-				pd3dDevice->SetTransform( D3DTS_WORLD, &matWorldOpponentsCar );
+#ifdef SMOOTH
+				D3DMATRIX mtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
+				pd3dDevice->SetTransform(D3DTS_WORLD, &mtx);
+#else
+				pd3dDevice->SetTransform(D3DTS_WORLD, &matWorldOpponentsCar);
+#endif
 				DrawCar(pd3dDevice);
+			}
 				break;
 
 			case GAME_IN_PROGRESS:
 			case GAME_OVER:
+			{
 				// Draw Opponent's Car
-				pd3dDevice->SetTransform( D3DTS_WORLD, &matWorldOpponentsCar );
+#ifdef SMOOTH
+				D3DMATRIX mtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
+				pd3dDevice->SetTransform(D3DTS_WORLD, &mtx);
+#else
+				pd3dDevice->SetTransform(D3DTS_WORLD, &matWorldOpponentsCar);
+#endif
 				DrawCar(pd3dDevice);
-
+			}
 				if (bOutsideView)
 				{
 					// Draw Player1's Car
+#ifdef SMOOTH
+					D3DMATRIX mtx = InterpolatorCarOwn.CreateInterpolatedMtx(GameTicker.TickPercent);
+					pd3dDevice->SetTransform(D3DTS_WORLD, &mtx);
+#else
 					pd3dDevice->SetTransform( D3DTS_WORLD, &matWorldCar );
+#endif
 					DrawCar(pd3dDevice);
 				}
 				else
