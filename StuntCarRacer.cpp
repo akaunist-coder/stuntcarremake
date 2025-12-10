@@ -40,7 +40,7 @@
 #ifdef linux
 #define DEFAULT_FRAME_GAP	(6)		// 4 Used to limit frame rate.  Amiga StuntCarRacer uses value of 6 (called MIN.FRAMES)
 #else
-#define DEFAULT_FRAME_GAP	(4)
+#define DEFAULT_FRAME_GAP	(5)
 #endif
 
 // Game timing notes:
@@ -50,7 +50,7 @@
 // - Lap timing uses game tick counter (globalGameTicks) instead of wall clock time
 // - Each game tick represents one game logic update (independent of frame rate)
 // - Conversion: 1 tick = 0.1333 seconds (based on NTSC timing for better game physics)
-// - This makes lap times accurate and consistent regardless of frameGap setting
+// - This makes lap times more accurate and consistent regardless of frameGap setting
 // - Users can adjust frameGap with F9/F10 keys to speed up or slow down gameplay
 
 #define	HEIGHT_ABOVE_ROAD	(100)

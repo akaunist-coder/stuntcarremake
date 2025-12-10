@@ -182,8 +182,12 @@ static void DrawHorizon( long viewpoint_y,
 			z = 1;
 			}
 
-		x = (trans_x / z) + screen_width/2;
-		y = (trans_y / z) + screen_height/2;
+		// Scale perspective projection to match screen resolution
+		// Original FOCUS=512 was designed for 640px width
+		// Scale both the division result and screen offset proportionally
+		double scale = screen_width / 640.0;
+		x = (long)((double)trans_x / (double)z * scale + 0.5) + screen_width/2;
+		y = (long)((double)trans_y / (double)z * scale + 0.5) + screen_height/2;
 
 		// store screen x and screen y
 		screen_coords[i].x = x;
@@ -200,7 +204,7 @@ static void DrawHorizon( long viewpoint_y,
 	long min_y = 0;
 	long max_x = screen_width - 1;
 	long max_y = screen_height - 1;
-	long on_screen, draw, ytop = 0, ybottom = 0, colour_index = 0;
+	long on_screen, colour_index = 0;
 
 	if ((x1 > x2) || ((x1 == x2) && (y1 > y2)))
 		upside_down = (! upside_down);
@@ -235,86 +239,69 @@ static void DrawHorizon( long viewpoint_y,
 
 	if (on_screen)
 		{
-		// draw top rectangle
-		draw = FALSE;
-
-		if (! upside_down)
+		// Draw horizon by scanning horizontally and interpolating the line
+		// This prevents gaps at large resolutions when the horizon is diagonal
+		
+		// Calculate the slope of the horizon line
+		long x_start = (xs < xl) ? xs : xl;
+		long x_end = (xs < xl) ? xl : xs;
+		long y_start = (xs < xl) ? ys : yl;
+		long y_end = (xs < xl) ? yl : ys;
+		
+		// Determine colors for top and bottom
+		long top_colour, bottom_colour;
+		if (!upside_down)
 			{
-			colour_index = SKY_COLOUR;
-
-			if (ys != yl)
+			top_colour = SKY_COLOUR;
+			bottom_colour = GROUND_COLOUR;
+			}
+		else
+			{
+			top_colour = GROUND_COLOUR;
+			bottom_colour = SKY_COLOUR;
+			}
+		
+		// Optimize by drawing horizontal runs with the same horizon_y
+		long prev_horizon_y = -1;
+		long run_start_x = min_x;
+		
+		for (long col_x = min_x; col_x <= max_x + 1; col_x++)
+			{
+			long horizon_y;
+			
+			if (col_x <= max_x)
 				{
-				ytop = 0;
-				if ((xl > min_x) && (xl < max_x))	// if not at either edge
-					ybottom = yl;
+				if (col_x <= x_start)
+					horizon_y = y_start;
+				else if (col_x >= x_end)
+					horizon_y = y_end;
 				else
-					ybottom = yl - 1;
-
-				draw = TRUE;
-				}
-			else	// ys == yl
-				if (ys > 0)
 					{
-					ytop = 0;
-					if (((xs == min_x) && (xl == max_x)) ||
-						((xs == max_x) && (xl == min_x)))	// if at both edges
-						ybottom = ys - 1;
-					else
-						ybottom = ys;
-
-					draw = TRUE;
-					}
-			}
-		else	// upside down
-			{
-			colour_index = GROUND_COLOUR;
-
-			if (ys != yl)
-				{
-				if (ys > 0)
-					{
-					ytop = 0;
-					ybottom = ys - 1;
-
-					draw = TRUE;
+					// Linear interpolation
+					horizon_y = y_start + ((y_end - y_start) * (col_x - x_start)) / (x_end - x_start);
 					}
 				}
-			else	// ys == yl
+			else
 				{
-				if (((xs == min_x) && (xl == max_x)) ||
-					((xs == max_x) && (xl == min_x)))	// if at both edges
-					{
-					ytop = 0;
-					ybottom = ys;
-
-					draw = TRUE;
-					}
+				// Force a flush on the last iteration
+				horizon_y = -999;
 				}
-			}
-
-		if (draw)
-			{
-			DrawFilledRectangle(min_x, ytop, max_x, ybottom, SCRGB(colour_index));
-			}
-
-
-		// draw bottom rectangle
-		// simply fill the area that the above rectangle missed
-		if (colour_index == SKY_COLOUR)
-			colour_index = GROUND_COLOUR;
-		else
-			colour_index = SKY_COLOUR;
-
-		if (draw)	// if previous rectangle was drawn
-			{
-			if (ybottom < max_y)
+			
+			// If horizon_y changed, draw the previous run
+			if (horizon_y != prev_horizon_y && prev_horizon_y != -1)
 				{
-				DrawFilledRectangle(min_x, ybottom+1, max_x, max_y, SCRGB(colour_index));
+				// Draw sky above horizon for this run
+				if (prev_horizon_y > min_y)
+					DrawFilledRectangle(run_start_x, min_y, col_x - 1, prev_horizon_y - 1, SCRGB(top_colour));
+				
+				// Draw ground below horizon for this run
+				if (prev_horizon_y < max_y)
+					DrawFilledRectangle(run_start_x, prev_horizon_y, col_x - 1, max_y, SCRGB(bottom_colour));
+				
+				run_start_x = col_x;
 				}
-			}
-		else
-			{
-			DrawFilledRectangle(min_x, min_y, max_x, max_y, SCRGB(colour_index));
+			
+			prev_horizon_y = horizon_y;
 			}
 		}
 	else	// horizon line is off screen
@@ -867,8 +854,10 @@ static void DrawScenery( long viewpoint_y,
 				z = 1;
 				}
 
-			x = (trans_x / z) + screen_width/2;
-			y = (trans_y / z) + screen_height/2;
+			// Scale perspective projection to match screen resolution
+			double scale = screen_width / 640.0;
+			x = (long)((double)trans_x / (double)z * scale + 0.5) + screen_width/2;
+			y = (long)((double)trans_y / (double)z * scale + 0.5) + screen_height/2;
 
 			// store screen x and screen y
 			screen_coords[i].x = x;
