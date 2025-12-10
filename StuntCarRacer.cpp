@@ -604,6 +604,12 @@ HRESULT CALLBACK OnCreateDevice( IDirect3DDevice9 *pd3dDevice, const D3DSURFACE_
                               OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, 
                               L"Arial", &g_pFontLarge ) );
 
+	// Set the projection transform with initial window size
+	D3DXMATRIX matProj;
+	FLOAT fAspect = pBackBufferSurfaceDesc->Width / static_cast<FLOAT>(pBackBufferSurfaceDesc->Height);
+	D3DXMatrixPerspectiveFovLH( &matProj, D3DX_PI/4, fAspect, 0.5f, FURTHEST_Z );
+	pd3dDevice->SetTransform( D3DTS_PROJECTION, &matProj );
+
     return S_OK;
 }
 
