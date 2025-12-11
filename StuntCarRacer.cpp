@@ -604,7 +604,7 @@ HRESULT CALLBACK OnCreateDevice( IDirect3DDevice9 *pd3dDevice, const D3DSURFACE_
                               OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, 
                               L"Arial", &g_pFontLarge ) );
 
-	// Set the projection transform with initial window size
+	// Set the initial projection transform (will be updated in OnResetDevice and when resizing)
 	D3DXMATRIX matProj;
 	FLOAT fAspect = pBackBufferSurfaceDesc->Width / static_cast<FLOAT>(pBackBufferSurfaceDesc->Height);
 	D3DXMatrixPerspectiveFovLH( &matProj, D3DX_PI/4, fAspect, 0.5f, FURTHEST_Z );
@@ -1743,32 +1743,49 @@ LRESULT CALLBACK MsgProc( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 	if (uMsg == WM_SIZING)
 	{
 		RECT* pRect = (RECT*)lParam;
-		int width = pRect->right - pRect->left;
-		int height = pRect->bottom - pRect->top;
 		
-		// Preserve aspect ratio based on wideScreen setting
-		// wideScreen=1 means 16:10 (800:480), wideScreen=0 would be 4:3
-		float targetAspect = wideScreen ? (800.0f / 480.0f) : (4.0f / 3.0f);
-		float currentAspect = static_cast<float>(width) / static_cast<float>(height);
-		
-		// Adjust based on which edge is being dragged
-		if (currentAspect > targetAspect)
+		// Get window chrome size (borders and title bar)
+		RECT windowRect = *pRect;
+		RECT clientRect;
+		HWND hwnd = DXUTGetHWND();
+		if (hwnd)
 		{
-			// Too wide, adjust width
-			int newWidth = static_cast<int>(height * targetAspect);
-			if (wParam == WMSZ_LEFT || wParam == WMSZ_TOPLEFT || wParam == WMSZ_BOTTOMLEFT)
-				pRect->left = pRect->right - newWidth;
-			else
-				pRect->right = pRect->left + newWidth;
-		}
-		else if (currentAspect < targetAspect)
-		{
-			// Too tall, adjust height
-			int newHeight = static_cast<int>(width / targetAspect);
-			if (wParam == WMSZ_TOP || wParam == WMSZ_TOPLEFT || wParam == WMSZ_TOPRIGHT)
-				pRect->top = pRect->bottom - newHeight;
-			else
-				pRect->bottom = pRect->top + newHeight;
+			GetClientRect(hwnd, &clientRect);
+			RECT currentWindowRect;
+			GetWindowRect(hwnd, &currentWindowRect);
+			
+			int chromeWidth = (currentWindowRect.right - currentWindowRect.left) - clientRect.right;
+			int chromeHeight = (currentWindowRect.bottom - currentWindowRect.top) - clientRect.bottom;
+			
+			// Calculate client area dimensions from the window rect being resized
+			int clientWidth = (pRect->right - pRect->left) - chromeWidth;
+			int clientHeight = (pRect->bottom - pRect->top) - chromeHeight;
+			
+			// Preserve aspect ratio based on wideScreen setting (5:3 for 800:480)
+			float targetAspect = wideScreen ? (5.0f / 3.0f) : (4.0f / 3.0f);
+			float currentAspect = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
+			
+			// Adjust based on which edge is being dragged
+			if (currentAspect > targetAspect)
+			{
+				// Too wide, adjust width based on client area
+				int newClientWidth = static_cast<int>(clientHeight * targetAspect);
+				int newWidth = newClientWidth + chromeWidth;
+				if (wParam == WMSZ_LEFT || wParam == WMSZ_TOPLEFT || wParam == WMSZ_BOTTOMLEFT)
+					pRect->left = pRect->right - newWidth;
+				else
+					pRect->right = pRect->left + newWidth;
+			}
+			else if (currentAspect < targetAspect)
+			{
+				// Too tall, adjust height based on client area
+				int newClientHeight = static_cast<int>(clientWidth / targetAspect);
+				int newHeight = newClientHeight + chromeHeight;
+				if (wParam == WMSZ_TOP || wParam == WMSZ_TOPLEFT || wParam == WMSZ_TOPRIGHT)
+					pRect->top = pRect->bottom - newHeight;
+				else
+					pRect->bottom = pRect->top + newHeight;
+			}
 		}
 		
 		*pbNoFurtherProcessing = true;
@@ -2002,9 +2019,9 @@ INT WINAPI WinMain( HINSTANCE, HINSTANCE, LPSTR, int )
 	int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 	int initialWidth = screenWidth / 2;
 	int initialHeight = screenHeight / 2;
-	// Maintain 16:10 aspect ratio
-	if (initialWidth * 10 != initialHeight * 16) {
-		initialHeight = (initialWidth * 10) / 16;
+	// Maintain 5:3 aspect ratio (same as 800:480)
+	if (initialWidth * 3 != initialHeight * 5) {
+		initialHeight = (initialWidth * 3) / 5;
 	}
 	
     DXUTCreateDevice( D3DADAPTER_DEFAULT, true, initialWidth, initialHeight, IsDeviceAcceptable, ModifyDeviceSettings );
