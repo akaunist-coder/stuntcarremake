@@ -1024,14 +1024,14 @@ long GetCurrentGameTick()
 
 void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fElapsedTime, void *pUserContext )
 {
-static D3DXVECTOR3 vUpVec( 0.0f, 1.0f, 0.0f );
-static long frameCount = 0;
-DWORD input = lastInput;	// take copy of user input
-D3DXMATRIX matRot, matTemp, matTrans, matView;
+	static D3DXVECTOR3 vUpVec( 0.0f, 1.0f, 0.0f );
+	static long frameCount = 0;
+	DWORD input = lastInput;	// take copy of user input
+	D3DXMATRIX matRot, matTemp, matTrans, matView;
 
 #ifndef linux
-// crude 60fps cap method...
-static float lastFrame = 0.0f;
+	// crude 60fps cap method...
+	static float lastFrame = 0.0f;
 #define FPSMAX (1.0f/60.f)
 	lastFrame += fElapsedTime;
 	if (lastFrame < FPSMAX)
@@ -1262,7 +1262,7 @@ static float lastFrame = 0.0f;
 #endif
 
 static void HandleTrackMenu( CDXUTTextHelper &txtHelper )
-	{
+{
 	long i, track_number;
 	UINT firstMenuOption, lastMenuOption;
 	float textScale = GetTextScale();
@@ -1270,9 +1270,9 @@ static void HandleTrackMenu( CDXUTTextHelper &txtHelper )
 	txtHelper.DrawTextLine( L"Choose track :-" );
 
 	for (i = 0, firstMenuOption = FIRSTMENU; i < NUM_TRACKS; i++)
-		{
+	{
 		txtHelper.DrawFormattedTextLine( L"'%d' -  " STRING, (i+1), GetTrackName(i) );
-		}
+	}
 	lastMenuOption = i + FIRSTMENU - 1;
 
 	// output instructions
@@ -1282,25 +1282,25 @@ static void HandleTrackMenu( CDXUTTextHelper &txtHelper )
 	txtHelper.DrawTextLine( L"'L' to switch Super League On/Off");
 
 	if (((keyPress >= firstMenuOption) && (keyPress <= lastMenuOption)) || (keyPress == LEAGUEMENU))
-		{
-		if(keyPress == LEAGUEMENU) {
+	{
+		if (keyPress == LEAGUEMENU) {
 			bSuperLeague = !bSuperLeague;
 			track_number = TrackID;
 			CreateCarVertexBuffer(DXUTGetD3DDevice());	// recreate car
 		} else 
 			track_number = keyPress - firstMenuOption;	// start at 0
 
-		if (! ConvertAmigaTrack(track_number))
-			{
+		if (!ConvertAmigaTrack(track_number))
+		{
 #if defined(DEBUG) || defined(_DEBUG)
 			fprintf(out, "Failed to convert track %d\n", track_number);
 #endif
 			MessageBox(NULL, L"Failed to convert track", L"Error", MB_OK);	//temp
 			return;
-			}
+		}
 
 		if (CreateTrackVertexBuffer(DXUTGetD3DDevice()) != S_OK)
-			{
+		{
 #if defined(DEBUG) || defined(_DEBUG)
 			fprintf(out, "Failed to create track vertex buffer %d\n", track_number);
 #endif
@@ -1308,21 +1308,21 @@ static void HandleTrackMenu( CDXUTTextHelper &txtHelper )
 			return;
 			}
 
-		keyPress = '\0';
+			keyPress = '\0';
 		}
 
 	if ((keyPress == STARTMENU) && (TrackID != NO_TRACK))
-		{
+	{
 		bNewGame = TRUE;	// Used here just to reset the opponent's car, which is then shown during the track preview
 		ResetPlayer();		// Also reset player to clear values if there was a previous game (CarBehaviour normally does this, but isn't called for track preview)
         GameMode = TRACK_PREVIEW;
 		bPlayerPaused = bOpponentPaused = FALSE;
 		keyPress = '\0';
-		}
+	}
 	
 
 	return;
-	}
+}
 
 
 /*	======================================================================================= */
@@ -1332,7 +1332,7 @@ static void HandleTrackMenu( CDXUTTextHelper &txtHelper )
 /*	======================================================================================= */
 
 static void HandleTrackPreview( CDXUTTextHelper &txtHelper )
-	{
+{
 	// output instructions
 	const D3DSURFACE_DESC *pd3dsdBackBuffer = DXUTGetBackBufferSurfaceDesc();
 	float textScale = GetTextScale();
@@ -1352,7 +1352,7 @@ static void HandleTrackPreview( CDXUTTextHelper &txtHelper )
 	txtHelper.DrawTextLine( L"  M = Back to track menu, Escape = Quit" );
 
 	if (keyPress == STARTMENU)
-		{
+	{
 		bNewGame = TRUE;
         GameMode = GAME_IN_PROGRESS;
 		// initialise game data
@@ -1360,7 +1360,7 @@ static void HandleTrackPreview( CDXUTTextHelper &txtHelper )
 		ResetLapData(PLAYER);
 		gameStartTime = DXUTGetTime();
 		gameEndTime = 0;
-		if(bSuperLeague) {
+		if (bSuperLeague) {
 			boostReserve = SuperBoost;
 			road_cushion_value = 1;
 			engine_power = 320;
@@ -1376,10 +1376,10 @@ static void HandleTrackPreview( CDXUTTextHelper &txtHelper )
 		boostUnit = 0;
 		bPlayerPaused = bOpponentPaused = FALSE;
 		keyPress = '\0';
-		}
+	}
 
 	return;
-	}
+}
 
 
 //--------------------------------------------------------------------------------------
@@ -1426,7 +1426,7 @@ void RenderText( double fTime )
 	}
 
 	switch (GameMode)
-		{
+	{
 		case TRACK_MENU:
 			HandleTrackMenu(txtHelper);
 			txtHelper.End();
@@ -1455,11 +1455,11 @@ void RenderText( double fTime )
 			
 			// Position text using base 800x480 coordinates, then scale
 			float base_height = static_cast<float>(BASE_HEIGHT);
-		float scaleY = static_cast<float>(pd3dsdBackBuffer->Height) / base_height;
+			float scaleY = static_cast<float>(pd3dsdBackBuffer->Height) / base_height;
 		
-		// Boost text - positioned in top dashboard box
-		txtHelper.SetInsertionPos( static_cast<int>((DASHBOARD_TEXT_X_BASE+(wideScreen?80:0)) * textScale), static_cast<int>((BASE_HEIGHT - DASHBOARD_TEXT_Y_TOP) * scaleY) );
-		txtHelper.DrawFormattedTextLine( L"L" STRING L"       B%02d", lapText, boostReserve );			// Distance text - positioned in bottom dashboard box
+			// Boost text - positioned in top dashboard box
+			txtHelper.SetInsertionPos( static_cast<int>((DASHBOARD_TEXT_X_BASE+(wideScreen?80:0)) * textScale), static_cast<int>((BASE_HEIGHT - DASHBOARD_TEXT_Y_TOP) * scaleY) );
+			txtHelper.DrawFormattedTextLine( L"L" STRING L"       B%02d", lapText, boostReserve );			// Distance text - positioned in bottom dashboard box
 			txtHelper.SetInsertionPos( static_cast<int>((DASHBOARD_TEXT_X_DISTANCE+(wideScreen?80:0)) * textScale), static_cast<int>((BASE_HEIGHT - DASHBOARD_TEXT_Y_BOTTOM) * scaleY) );
 			txtHelper.DrawFormattedTextLine( L"        %+05d", CalculateOpponentsDistance() );
 
@@ -1555,9 +1555,9 @@ void RenderText( double fTime )
 				txtHelperLarge.End();
 			}
 			break;
-		}
-//	VALUE2 = raceFinished ? 1 : 0;
-//	VALUE3 = (long)gameEndTime;
+	}
+	//	VALUE2 = raceFinished ? 1 : 0;
+	//	VALUE3 = (long)gameEndTime;
 }
 
 
@@ -1659,7 +1659,7 @@ D3DLIGHT9 light;
 
 void CALLBACK OnFrameRender( IDirect3DDevice9 *pd3dDevice, double fTime, float fElapsedTime, void *pUserContext )
 {
-HRESULT hr;
+	HRESULT hr;
 
 //    // Clear the render target and the zbuffer
 //    V( pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_ARGB(0, 45, 50, 170), 1.0f, 0) );
@@ -1684,7 +1684,7 @@ HRESULT hr;
 		DrawTrack(pd3dDevice);
 
 		switch (GameMode)
-			{
+		{
 			case TRACK_MENU:
 				break;
 
@@ -1702,17 +1702,17 @@ HRESULT hr;
 
 				if (bOutsideView)
 				{
-				// Draw Player1's Car
-				pd3dDevice->SetTransform( D3DTS_WORLD, &matWorldCar );
-				DrawCar(pd3dDevice);
+					// Draw Player1's Car
+					pd3dDevice->SetTransform( D3DTS_WORLD, &matWorldCar );
+					DrawCar(pd3dDevice);
 				}
 				else
 				{
-				// draw cockpit...
-				DrawCockpit(pd3dDevice);
+					// draw cockpit...
+					DrawCockpit(pd3dDevice);
 				}
 				break;
-			}
+		}
 
 		if (GameMode == GAME_IN_PROGRESS)
 		{

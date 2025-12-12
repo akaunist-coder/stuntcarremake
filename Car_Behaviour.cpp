@@ -4204,19 +4204,19 @@ void UpdateLapData (void)
 
 	for (car = OPPONENT; car < NUM_CARS; car++)
 	{
-		if (!raceFinished)
+		if (lapNumber[car] == LAP_THAT_FINISHES_RACE)
 		{
-			if (lapNumber[car] == LAP_THAT_FINISHES_RACE)
+			// Save total race time when finishing (convert ticks to seconds)
+			extern long GetCurrentGameTick();
+			if (raceStartTick[car] > 0 && totalRaceTime[car] == 0.0)
+			{
+				long raceTicks = GetCurrentGameTick() - raceStartTick[car];
+				totalRaceTime[car] = raceTicks * SECONDS_PER_GAME_TICK;
+			}
+
+			if (!raceFinished)
 			{
 				raceFinished = true;
-				
-				// Save total race time when finishing (convert ticks to seconds)
-				extern long GetCurrentGameTick();
-				if (raceStartTick[car] > 0)
-				{
-					long raceTicks = GetCurrentGameTick() - raceStartTick[car];
-					totalRaceTime[car] = raceTicks * SECONDS_PER_GAME_TICK;
-				}
 
 				// frames to show message for = 44; about 5.64 seconds
 
