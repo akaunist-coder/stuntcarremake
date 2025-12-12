@@ -2,6 +2,14 @@
 #ifndef	_STUNT_CAR_RACER
 #define	_STUNT_CAR_RACER
 
+// Frame interpolation mode:
+// When enabled, provides smooth 60 FPS rendering while maintaining game logic at lower update rate
+// - Uses quaternion-based (SLERP) interpolation for smooth camera movement
+// - Separates rendering frame rate from game logic tick rate
+// - Game timing remains accurate (based on globalGameTicks, not wall clock)
+// Comment out the following line to disable frame interpolation and use classic frame-skipping mode
+#define SMOOTH
+
 /*	========= */
 /*	Constants */
 /*	========= */

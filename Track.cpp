@@ -16,6 +16,9 @@
 #include "StuntCarRacer.h"
 #include "3D_Engine.h"
 #include "Atlas.h"
+#ifdef SMOOTH
+#include "Opponent_Behaviour.h"
+#endif
 
 /*	===== */
 /*	Debug */
@@ -1975,6 +1978,20 @@ DWORD colour;
 
 	pShadowVB->Unlock();
 }
+
+#ifdef SMOOTH
+void UpdateInterpolatedShadow(float t)
+{
+	D3DXVECTOR3 v1, v2, v3, v4;
+	
+	RemoveShadowTriangles();
+	if (GetInterpolatedShadowVertices(t, v1, v2, v3, v4))
+	{
+		StoreShadowTriangle(v2, v1, v3, 0);
+		StoreShadowTriangle(v1, v4, v3, 0);
+	}
+}
+#endif
 
 
 // Create piece in vertex buffer as TRIANGLELIST

@@ -37,13 +37,10 @@
 // Defines, constants, and global variables
 //-----------------------------------------------------------------------------
 
-// Frame interpolation mode:
-// When enabled, provides smooth 60 FPS rendering while maintaining game logic at lower update rate
-// - Uses quaternion-based (SLERP) interpolation for smooth camera movement
-// - Separates rendering frame rate from game logic tick rate
-// - Game timing remains accurate (based on globalGameTicks, not wall clock)
-// Comment out the following line to disable frame interpolation and use classic frame-skipping mode
-#define SMOOTH
+#ifdef SMOOTH
+// Forward declaration for smooth shadow rendering
+extern void UpdateInterpolatedShadow(float t);
+#endif
 
 #ifdef linux
 #define DEFAULT_FRAME_GAP	(6)		// 4 Used to limit frame rate.  Amiga StuntCarRacer uses value of 6 (called MIN.FRAMES)
@@ -1914,6 +1911,14 @@ void CALLBACK OnFrameRender( IDirect3DDevice9 *pd3dDevice, double fTime, float f
 #endif
 
 //		SetupLights(pd3dDevice);
+
+#ifdef SMOOTH
+		// Update interpolated shadow before drawing track
+		if (GameMode == GAME_IN_PROGRESS)
+		{
+			UpdateInterpolatedShadow(GameTicker.TickPercent);
+		}
+#endif
 
 		// Draw Track
 		pd3dDevice->SetTransform( D3DTS_WORLD, &matWorldTrack );
