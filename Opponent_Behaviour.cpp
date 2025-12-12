@@ -225,6 +225,13 @@ static COORD_3D opp_shadow_rear_right;
 static COORD_3D opp_shadow_front_left;
 static COORD_3D opp_shadow_front_right;
 
+#ifdef SMOOTH
+// For smooth shadow rendering
+static COORD_3D opp_shadow_rear_left_old, opp_shadow_rear_right_old;
+static COORD_3D opp_shadow_front_left_old, opp_shadow_front_right_old;
+static bool opp_draw_shadow = true;
+#endif
+
 // wheel heights
 static long opp_actual_height[NUM_OPP_WHEEL_POSITIONS];
 
@@ -527,6 +534,13 @@ long piece = opponents_current_piece, next_segment;
 long left_side_x, left_side_z, right_side_x, right_side_z;
 bool draw_shadow = TRUE;
 
+#ifdef SMOOTH
+	// Save OLD shadow positions BEFORE calculating new ones
+	opp_shadow_rear_left_old = opp_shadow_rear_left;
+	opp_shadow_rear_right_old = opp_shadow_rear_right;
+	opp_shadow_front_left_old = opp_shadow_front_left;
+	opp_shadow_front_right_old = opp_shadow_front_right;
+#endif
 
 	/*
 	 * Rear wheels
@@ -823,12 +837,19 @@ bool draw_shadow = TRUE;
 	v1 = D3DXVECTOR3( static_cast<float>(opp_shadow_front_left.x), 7 + static_cast<float>(opp_shadow_front_left.y)/2, static_cast<float>(opp_shadow_front_left.z) );
 	v4 = D3DXVECTOR3( static_cast<float>(opp_shadow_front_right.x), 7 + static_cast<float>(opp_shadow_front_right.y)/2, static_cast<float>(opp_shadow_front_right.z) );
 
+#ifdef SMOOTH
+	// Store draw flag for interpolation (shadow will be rendered with interpolation during frame render)
+	// Old shadow positions were saved at the START of this function
+	opp_draw_shadow = draw_shadow;
+#else
+	// Without smoothing, store shadow triangles immediately
 	RemoveShadowTriangles();
 	if (draw_shadow)
 	{
 		StoreShadowTriangle(v2, v1, v3, 0);
 		StoreShadowTriangle(v1, v4, v3, 0);
 	}
+#endif
 #endif
 
 //	VALUE1 = opp_rear_left_road_pos.y;
@@ -837,6 +858,44 @@ bool draw_shadow = TRUE;
 	return;
 }
 
+#ifdef SMOOTH
+/*	======================================================================================= */
+/*	Function:		GetInterpolatedShadowVertices											*/
+/*																							*/
+/*	Description:	Get interpolated shadow vertices for smooth rendering					*/
+/*	======================================================================================= */
+
+bool GetInterpolatedShadowVertices(float t, D3DXVECTOR3& v1, D3DXVECTOR3& v2, D3DXVECTOR3& v3, D3DXVECTOR3& v4)
+{
+	if (!opp_draw_shadow)
+		return false;
+
+	// Interpolate shadow positions between old (previous game tick) and new (current game tick)
+	float rear_left_x = opp_shadow_rear_left_old.x + t * (opp_shadow_rear_left.x - opp_shadow_rear_left_old.x);
+	float rear_left_y = opp_shadow_rear_left_old.y + t * (opp_shadow_rear_left.y - opp_shadow_rear_left_old.y);
+	float rear_left_z = opp_shadow_rear_left_old.z + t * (opp_shadow_rear_left.z - opp_shadow_rear_left_old.z);
+
+	float rear_right_x = opp_shadow_rear_right_old.x + t * (opp_shadow_rear_right.x - opp_shadow_rear_right_old.x);
+	float rear_right_y = opp_shadow_rear_right_old.y + t * (opp_shadow_rear_right.y - opp_shadow_rear_right_old.y);
+	float rear_right_z = opp_shadow_rear_right_old.z + t * (opp_shadow_rear_right.z - opp_shadow_rear_right_old.z);
+
+	float front_left_x = opp_shadow_front_left_old.x + t * (opp_shadow_front_left.x - opp_shadow_front_left_old.x);
+	float front_left_y = opp_shadow_front_left_old.y + t * (opp_shadow_front_left.y - opp_shadow_front_left_old.y);
+	float front_left_z = opp_shadow_front_left_old.z + t * (opp_shadow_front_left.z - opp_shadow_front_left_old.z);
+
+	float front_right_x = opp_shadow_front_right_old.x + t * (opp_shadow_front_right.x - opp_shadow_front_right_old.x);
+	float front_right_y = opp_shadow_front_right_old.y + t * (opp_shadow_front_right.y - opp_shadow_front_right_old.y);
+	float front_right_z = opp_shadow_front_right_old.z + t * (opp_shadow_front_right.z - opp_shadow_front_right_old.z);
+
+	// Build vertices (same format as original code)
+	v2 = D3DXVECTOR3(rear_left_x, 7 + rear_left_y/2, rear_left_z);
+	v3 = D3DXVECTOR3(rear_right_x, 7 + rear_right_y/2, rear_right_z);
+	v1 = D3DXVECTOR3(front_left_x, 7 + front_left_y/2, front_left_z);
+	v4 = D3DXVECTOR3(front_right_x, 7 + front_right_y/2, front_right_z);
+	
+	return true;
+}
+#endif
 
 static void GetSurfaceCoords( long piece, long segment )
 {

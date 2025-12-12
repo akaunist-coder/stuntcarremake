@@ -105,6 +105,10 @@ extern HRESULT CreateShadowVertexBuffer (IDirect3DDevice9 *pd3dDevice);
 
 extern void FreeShadowVertexBuffer (void);
 
+#ifdef SMOOTH
+extern void UpdateInterpolatedShadow(float t);
+#endif
+
 extern void MoveDrawBridge ( void );
 
 extern void ResetDrawBridge( void );

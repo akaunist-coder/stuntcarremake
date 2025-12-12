@@ -28,4 +28,9 @@ extern long CalculateIfWinning( long start_finish_piece );
 
 extern long CalculateOpponentsDistance (void);
 
+#ifdef SMOOTH
+#include <d3dx9.h>
+extern bool GetInterpolatedShadowVertices(float t, D3DXVECTOR3& v1, D3DXVECTOR3& v2, D3DXVECTOR3& v3, D3DXVECTOR3& v4);
+#endif
+
 #endif	/* _OPPONENT_BEHAVIOUR */
