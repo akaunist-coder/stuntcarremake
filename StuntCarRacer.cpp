@@ -907,6 +907,57 @@ static void CalcTrackPreviewViewpoint( void )
 }
 
 /*	======================================================================================= */
+/*	Backdrop angle smoothing															*/
+/*	======================================================================================= */
+
+#ifdef SMOOTH
+// Backdrop angle smoothing
+struct AngleInterpolator
+{
+	long old_x_angle, old_y_angle, old_z_angle;
+	long new_x_angle, new_y_angle, new_z_angle;
+
+	void UpdateAngles(long x_angle, long y_angle, long z_angle)
+	{
+		old_x_angle = new_x_angle;
+		old_y_angle = new_y_angle;
+		old_z_angle = new_z_angle;
+
+		new_x_angle = x_angle;
+		new_y_angle = y_angle;
+		new_z_angle = z_angle;
+	}
+
+	// Helper to compute shortest angle difference considering wrapping
+	long AngleDiff(long from, long to)
+	{
+		long diff = to - from;
+		// Normalize to [-MAX_ANGLE/2, MAX_ANGLE/2] to take shortest path
+		if (diff > MAX_ANGLE / 2)
+			diff -= MAX_ANGLE;
+		else if (diff < -MAX_ANGLE / 2)
+			diff += MAX_ANGLE;
+		return diff;
+	}
+
+	void GetInterpolatedAngles(float f, long& out_x, long& out_y, long& out_z)
+	{
+		// Use shortest path for angle interpolation
+		out_x = old_x_angle + static_cast<long>(f * AngleDiff(old_x_angle, new_x_angle));
+		out_y = old_y_angle + static_cast<long>(f * AngleDiff(old_y_angle, new_y_angle));
+		out_z = old_z_angle + static_cast<long>(f * AngleDiff(old_z_angle, new_z_angle));
+		
+		// Ensure angles stay in valid range [0, MAX_ANGLE)
+		out_x = (out_x + MAX_ANGLE) % MAX_ANGLE;
+		out_y = (out_y + MAX_ANGLE) % MAX_ANGLE;
+		out_z = (out_z + MAX_ANGLE) % MAX_ANGLE;
+	}
+};
+
+AngleInterpolator BackdropAngleInterpolator;
+#endif
+
+/*	======================================================================================= */
 /*	Function:		CalcGameViewpoint														*/
 /*																							*/
 /*	Description:	*/
@@ -955,6 +1006,11 @@ long x_offset, y_offset, z_offset;
 		viewpoint1_y_angle = player1_y_angle;
 		viewpoint1_z_angle = player1_z_angle;
 	}
+
+#ifdef SMOOTH
+	// Update backdrop angle interpolator
+	BackdropAngleInterpolator.UpdateAngles(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+#endif
 }
 
 //--------------------------------------------------------------------------------------
@@ -998,8 +1054,6 @@ struct MTXInterpolator
 MTXInterpolator InterpolatorView;
 MTXInterpolator InterpolatorCarOwn;
 MTXInterpolator InterpolatorCarOpponent;
-
-
 
 static D3DXMATRIX matWorldTrack;
 #else
@@ -1289,6 +1343,11 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 			// Set the car's world transform matrix
 			SetOpponentsCarWorldTransform();
 		}
+
+#ifdef SMOOTH
+		// Update backdrop angle interpolator
+		BackdropAngleInterpolator.UpdateAngles(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+#endif
 
 		// Set Direct3D transforms, ready for OnFrameRender
 		viewpoint1_x >>= LOG_PRECISION;
@@ -1846,7 +1905,13 @@ void CALLBACK OnFrameRender( IDirect3DDevice9 *pd3dDevice, double fTime, float f
 		pd3dDevice->SetRenderState( D3DRS_CULLMODE, D3DCULL_NONE );
 
 		// Draw Backdrop
+#ifdef SMOOTH
+		long smooth_x_angle, smooth_y_angle, smooth_z_angle;
+		BackdropAngleInterpolator.GetInterpolatedAngles(GameTicker.TickPercent, smooth_x_angle, smooth_y_angle, smooth_z_angle);
+		DrawBackdrop(viewpoint1_y, smooth_x_angle, smooth_y_angle, smooth_z_angle);
+#else
 		DrawBackdrop(viewpoint1_y, viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+#endif
 
 //		SetupLights(pd3dDevice);
 
