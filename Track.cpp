@@ -20,6 +20,8 @@
 #include "Opponent_Behaviour.h"
 #endif
 
+extern bool bOutsideView;
+
 /*	===== */
 /*	Debug */
 /*	===== */
@@ -1838,21 +1840,26 @@ D3DXVECTOR3 v;
 
 static void StorePieceTriangle( long piece, long piece_x, long piece_y, long piece_z, long offset1, long offset2, long offset3, UTVERTEX *pVertices, DWORD colour, short txind, long s )
 {
-D3DXVECTOR3 v1, v2, v3;//, edge1, edge2, surface_normal;
+D3DXVECTOR3 v1, v2, v3;
+#ifdef GOURAUD_SHADING
+D3DXVECTOR3 edge1, edge2, surface_normal;
+#endif
 
 	v1 = GetPieceVertex( piece, piece_x, piece_y, piece_z, offset1 );
 	v2 = GetPieceVertex( piece, piece_x, piece_y, piece_z, offset2 );
 	v3 = GetPieceVertex( piece, piece_x, piece_y, piece_z, offset3 );
 
-	/*
-	// Calculate surface normal
-	edge1 = v2-v1; edge2 = v3-v2;
+#ifdef GOURAUD_SHADING
+	// Calculate surface normal (fixed: both edges from v1)
+	edge1 = v2-v1; edge2 = v3-v1;
 	D3DXVec3Cross( &surface_normal, &edge1, &edge2 );
 	D3DXVec3Normalize( &surface_normal, &surface_normal );
-	*/
+#endif
 
 	pVertices[trackVertices].pos = v1;
-//	pVertices[trackVertices].normal = surface_normal;
+#ifdef GOURAUD_SHADING
+	pVertices[trackVertices].normal = surface_normal;
+#endif
 	pVertices[trackVertices].color = colour;//D3DCOLOR_XRGB(255,255,255);
 	if (txind == 1)
 	{
@@ -1867,7 +1874,9 @@ D3DXVECTOR3 v1, v2, v3;//, edge1, edge2, surface_normal;
 	++trackVertices;
 
 	pVertices[trackVertices].pos = v2;
-//	pVertices[trackVertices].normal = surface_normal;
+#ifdef GOURAUD_SHADING
+	pVertices[trackVertices].normal = surface_normal;
+#endif
 	pVertices[trackVertices].color = colour;//D3DCOLOR_XRGB(255,255,255);
 	if (txind == 1)
 	{
@@ -1882,7 +1891,9 @@ D3DXVECTOR3 v1, v2, v3;//, edge1, edge2, surface_normal;
 	++trackVertices;
 
 	pVertices[trackVertices].pos = v3;
-//	pVertices[trackVertices].normal = surface_normal;
+#ifdef GOURAUD_SHADING
+	pVertices[trackVertices].normal = surface_normal;
+#endif
 	pVertices[trackVertices].color = colour;//D3DCOLOR_XRGB(255,255,255);
 	if (txind == 1)
 	{
@@ -1901,21 +1912,26 @@ D3DXVECTOR3 v1, v2, v3;//, edge1, edge2, surface_normal;
 // Fetch and store the piece vertex identified by offset1 (offset2 and 3 are just used to calculate the surface normal)
 static void StorePieceVertex1( long piece, long piece_x, long piece_y, long piece_z, long offset1, long offset2, long offset3, UTVERTEX *pVertices, DWORD colour, short txind, long s )
 {
-D3DXVECTOR3 v1;//, v2, v3, edge1, edge2, surface_normal;
+D3DXVECTOR3 v1;
+#ifdef GOURAUD_SHADING
+D3DXVECTOR3 v2, v3, edge1, edge2, surface_normal;
+#endif
 
 	v1 = GetPieceVertex( piece, piece_x, piece_y, piece_z, offset1 );
-	/*
+#ifdef GOURAUD_SHADING
 	v2 = GetPieceVertex( piece, piece_x, piece_y, piece_z, offset2 );
 	v3 = GetPieceVertex( piece, piece_x, piece_y, piece_z, offset3 );
 
-	// Calculate surface normal
-	edge1 = v2-v1; edge2 = v3-v2;
+	// Calculate surface normal (fixed: both edges from v1)
+	edge1 = v2-v1; edge2 = v3-v1;
 	D3DXVec3Cross( &surface_normal, &edge1, &edge2 );
 	D3DXVec3Normalize( &surface_normal, &surface_normal );
-	*/
+#endif
 
 	pVertices[trackVertices].pos = v1;
-//	pVertices[trackVertices].normal = surface_normal;
+#ifdef GOURAUD_SHADING
+	pVertices[trackVertices].normal = surface_normal;
+#endif
 	pVertices[trackVertices].color = colour;
 	if (txind == 1)
 	{
@@ -1939,8 +1955,10 @@ void RemoveShadowTriangles( void )
 
 void StoreShadowTriangle( D3DXVECTOR3 v1, D3DXVECTOR3 v2, D3DXVECTOR3 v3, long other_colour )
 {
-//D3DXVECTOR3 edge1, edge2, surface_normal;
 DWORD colour;
+#ifdef GOURAUD_SHADING
+D3DXVECTOR3 edge1, edge2, surface_normal;
+#endif
 
 	UTVERTEX *pVertices;
 	if( FAILED( pShadowVB->Lock( 0, 0, (void**)&pVertices, 0 ) ) )
@@ -1949,12 +1967,12 @@ DWORD colour;
 		return;
 	}
 
-	/*
-	// Calculate surface normal
-	edge1 = v2-v1; edge2 = v3-v2;
+#ifdef GOURAUD_SHADING
+	// Calculate surface normal (fixed: both edges from v1)
+	edge1 = v2-v1; edge2 = v3-v1;
 	D3DXVec3Cross( &surface_normal, &edge1, &edge2 );
 	D3DXVec3Normalize( &surface_normal, &surface_normal );
-	*/
+#endif
 
 	if (other_colour)
 		colour = SCRGB(SCR_BASE_COLOUR + 15);
@@ -1962,17 +1980,23 @@ DWORD colour;
 		colour = SCRGB(SCR_BASE_COLOUR + 5);
 
 	pVertices[numShadowVertices].pos = v1;
-//	pVertices[numShadowVertices].normal = surface_normal;
+#ifdef GOURAUD_SHADING
+	pVertices[numShadowVertices].normal = surface_normal;
+#endif
 	pVertices[numShadowVertices].color = colour;
 	++numShadowVertices;
 
 	pVertices[numShadowVertices].pos = v2;
-//	pVertices[numShadowVertices].normal = surface_normal;
+#ifdef GOURAUD_SHADING
+	pVertices[numShadowVertices].normal = surface_normal;
+#endif
 	pVertices[numShadowVertices].color = colour;
 	++numShadowVertices;
 
 	pVertices[numShadowVertices].pos = v3;
-//	pVertices[numShadowVertices].normal = surface_normal;
+#ifdef GOURAUD_SHADING
+	pVertices[numShadowVertices].normal = surface_normal;
+#endif
 	pVertices[numShadowVertices].color = colour;
 	++numShadowVertices;
 
@@ -2476,8 +2500,8 @@ void DrawTrack (IDirect3DDevice9 *pd3dDevice)
 		}
 	}
 
-	/* Finally draw the opponent's car shadow */
-	if ((GameMode != TRACK_MENU) && (numShadowVertices > 0))
+	/* Finally draw the opponent's car shadow (but not in cockpit view where it looks wrong) */
+	if ((GameMode != TRACK_MENU) && (numShadowVertices > 0) && bOutsideView)
 	{
 		pd3dDevice->SetStreamSource( 0, pShadowVB, 0, sizeof(UTVERTEX) );
 		pd3dDevice->SetFVF( D3DFVF_UTVERTEX );

@@ -530,7 +530,10 @@ static long numCarVertices = 0;
 
 static void StoreCarTriangle( COORD_3D *c1, COORD_3D *c2, COORD_3D *c3, UTVERTEX *pVertices, DWORD colour )
 {
-D3DXVECTOR3 v1, v2, v3;//, edge1, edge2, surface_normal;
+D3DXVECTOR3 v1, v2, v3;
+#ifdef GOURAUD_SHADING
+D3DXVECTOR3 edge1, edge2, surface_normal;
+#endif
 
 	if ((numCarVertices+3) > MAX_VERTICES_PER_CAR)
 	{
@@ -542,25 +545,31 @@ D3DXVECTOR3 v1, v2, v3;//, edge1, edge2, surface_normal;
 	v2 = D3DXVECTOR3( static_cast<float>(c2->x), static_cast<float>(c2->y), static_cast<float>(c2->z) );
 	v3 = D3DXVECTOR3( static_cast<float>(c3->x), static_cast<float>(c3->y), static_cast<float>(c3->z) );
 
-	/*
-	// Calculate surface normal
-	edge1 = v2-v1; edge2 = v3-v2;
+#ifdef GOURAUD_SHADING
+	// Calculate surface normal (fixed: both edges from v1)
+	edge1 = v2-v1; edge2 = v3-v1;
 	D3DXVec3Cross( &surface_normal, &edge1, &edge2 );
 	D3DXVec3Normalize( &surface_normal, &surface_normal );
-	*/
+#endif
 
 	pVertices[numCarVertices].pos = v1;
-//	pVertices[numCarVertices].normal = surface_normal;
+#ifdef GOURAUD_SHADING
+	pVertices[numCarVertices].normal = surface_normal;
+#endif
 	pVertices[numCarVertices].color = colour;
 	++numCarVertices;
 
 	pVertices[numCarVertices].pos = v2;
-//	pVertices[numCarVertices].normal = surface_normal;
+#ifdef GOURAUD_SHADING
+	pVertices[numCarVertices].normal = surface_normal;
+#endif
 	pVertices[numCarVertices].color = colour;
 	++numCarVertices;
 
 	pVertices[numCarVertices].pos = v3;
-//	pVertices[numCarVertices].normal = surface_normal;
+#ifdef GOURAUD_SHADING
+	pVertices[numCarVertices].normal = surface_normal;
+#endif
 	pVertices[numCarVertices].color = colour;
 	++numCarVertices;
 }

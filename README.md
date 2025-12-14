@@ -42,6 +42,9 @@ Controls are:
 On Linux / Windows
  4 Arrows for Turning / Accelerate / Brake
  Space for Boost
+ Backspace - Toggle camera view (cockpit/external) - **DEBUG builds only**
+ F9/F10 - Decrease/Increase frame gap
+ M - Return to menu
 
 On Pandora
  DPad Left/Right for turning

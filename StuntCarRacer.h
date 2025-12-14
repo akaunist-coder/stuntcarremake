@@ -10,6 +10,14 @@
 // Comment out the following line to disable frame interpolation and use classic frame-skipping mode
 #define SMOOTH
 
+// Gouraud shading mode:
+// When enabled, uses Gouraud shading with dynamic lighting instead of flat shading
+// - Adds per-vertex normals for smooth lighting across surfaces
+// - Enables D3D lighting system with directional lights
+// - Increases vertex buffer size by ~30% (12 bytes per vertex for normals)
+// Uncomment the following line to enable Gouraud shading
+#define GOURAUD_SHADING
+
 /*	========= */
 /*	Constants */
 /*	========= */
@@ -38,30 +46,24 @@ typedef enum
 	GAME_OVER
 	} GameModeType;
 
-/*
-// Untransformed coloured vertex
-#define D3DFVF_UTVERTEX (D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_DIFFUSE)
-*/
 // Untransformed coloured textured vertex
+#ifdef GOURAUD_SHADING
+#define D3DFVF_UTVERTEX (D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_DIFFUSE|D3DFVF_TEX1)
+#else
 #define D3DFVF_UTVERTEX (D3DFVF_XYZ|D3DFVF_DIFFUSE|D3DFVF_TEX1)
+#endif
 
 /*	===================== */
 /*	Structure definitions */
 /*	===================== */
-/*
-// Untransformed coloured vertex
-struct UTVERTEX
-{
-    D3DXVECTOR3 pos;	// The untransformed position for the vertex
-	D3DXVECTOR3 normal;	// The surface normal for the vertex
-    DWORD color;		// The vertex diffuse color value
-};
-*/
 #ifndef linux
 // Untransformed coloured textured vertex
 struct UTVERTEX
 {
     D3DXVECTOR3 pos;	// The untransformed position for the vertex
+#ifdef GOURAUD_SHADING
+	D3DXVECTOR3 normal;	// The surface normal for the vertex
+#endif
     DWORD color;		// The vertex diffuse color value
 	FLOAT tu,tv;		// The texture co-ordinates
 };

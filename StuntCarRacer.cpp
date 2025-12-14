@@ -629,6 +629,11 @@ HRESULT CALLBACK OnCreateDevice( IDirect3DDevice9 *pd3dDevice, const D3DSURFACE_
 }
 
 
+#ifdef GOURAUD_SHADING
+// Forward declaration for lighting setup function
+void SetupLights( IDirect3DDevice9 *pd3dDevice );
+#endif
+
 //--------------------------------------------------------------------------------------
 // Create any D3DPOOL_DEFAULT resources here 
 //--------------------------------------------------------------------------------------
@@ -705,11 +710,21 @@ HRESULT CALLBACK OnResetDevice( IDirect3DDevice9 *pd3dDevice,
     pd3dDevice->SetTransform( D3DTS_PROJECTION, &matProj );
 
     pd3dDevice->SetRenderState( D3DRS_ZENABLE,      TRUE );
+#ifdef GOURAUD_SHADING
+    pd3dDevice->SetRenderState( D3DRS_SHADEMODE,    D3DSHADE_GOURAUD );
+    pd3dDevice->SetRenderState( D3DRS_LIGHTING,     TRUE );
+#else
     pd3dDevice->SetRenderState( D3DRS_SHADEMODE,    D3DSHADE_FLAT );
     pd3dDevice->SetRenderState( D3DRS_LIGHTING,     FALSE );
+#endif
 
 	// Disable texture mapping by default (only DrawTrack() enables it)
 	pd3dDevice->SetTextureStageState( 0, D3DTSS_COLOROP, D3DTOP_DISABLE );
+
+#ifdef GOURAUD_SHADING
+	// Set up the lights and materials for Gouraud shading
+	SetupLights(pd3dDevice);
+#endif
 
 	return S_OK;
 }
@@ -1950,7 +1965,7 @@ void RenderText( double fTime )
 }
 
 
-#ifdef NOT_USED
+#if defined(GOURAUD_SHADING) || defined(NOT_USED)
 //-----------------------------------------------------------------------------
 // Name: SetupLights()
 // Desc: Sets up the lights and materials for the scene.
@@ -2078,8 +2093,8 @@ void CALLBACK OnFrameRender( IDirect3DDevice9 *pd3dDevice, double fTime, float f
 //		SetupLights(pd3dDevice);
 
 #ifdef SMOOTH
-		// Update interpolated shadow before drawing track
-		if (GameMode == GAME_IN_PROGRESS)
+		// Update interpolated shadow before drawing track (only in outside view)
+		if (GameMode == GAME_IN_PROGRESS && bOutsideView)
 		{
 			UpdateInterpolatedShadow(GameTicker.TickPercent);
 		}
