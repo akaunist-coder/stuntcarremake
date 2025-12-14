@@ -1052,6 +1052,32 @@ MTXInterpolator InterpolatorView;
 MTXInterpolator InterpolatorCarOwn;
 MTXInterpolator InterpolatorCarOpponent;
 
+// Camera position interpolator for track preview
+struct Vec3Interpolator
+{
+	long old_x, old_y, old_z;
+	long new_x, new_y, new_z;
+
+	void Update(long x, long y, long z)
+	{
+		old_x = new_x;
+		old_y = new_y;
+		old_z = new_z;
+		new_x = x;
+		new_y = y;
+		new_z = z;
+	}
+
+	void GetInterpolated(float t, long& out_x, long& out_y, long& out_z)
+	{
+		out_x = old_x + static_cast<long>((new_x - old_x) * t);
+		out_y = old_y + static_cast<long>((new_y - old_y) * t);
+		out_z = old_z + static_cast<long>((new_z - old_z) * t);
+	}
+};
+
+Vec3Interpolator CameraPositionInterpolator;
+
 static D3DXMATRIX matWorldTrack;
 #else
 static D3DXMATRIX matWorldTrack, matWorldCar, matWorldOpponentsCar;
@@ -1246,32 +1272,29 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 				D3DMATRIX viewMtx = InterpolatorView.CreateInterpolatedMtx(GameTicker.TickPercent, true);
 				pd3dDevice->SetTransform(D3DTS_VIEW, &viewMtx);
 			}
+			else if (GameMode == TRACK_PREVIEW)
+			{
+				// Set view matrix for track preview on interpolation frames
+				// Interpolate camera position (already scaled)
+				long cam_x, cam_y, cam_z;
+				CameraPositionInterpolator.GetInterpolated(GameTicker.TickPercent, cam_x, cam_y, cam_z);
+				D3DXVECTOR3 vEyePt(static_cast<float>(cam_x), static_cast<float>(-cam_y), static_cast<float>(cam_z));
+				// Lookat the interpolated car position
+				D3DXMATRIX carMtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
+				D3DXVECTOR3 vLookatPt(carMtx._41, carMtx._42, carMtx._43);
+				D3DXMatrixLookAtLH(&matView, &vEyePt, &vLookatPt, &vUpVec);
+				pd3dDevice->SetTransform(D3DTS_VIEW, &matView);
+			}
 			return;  // Early return for interpolation frames (no game logic)
 		}
 
 		// Increment game tick counter when game logic runs (every GameTicker.DoFrame)
 		if (!bPaused)
-			globalGameTicks++;
+		globalGameTicks++;
 
-		if (GameMode == TRACK_PREVIEW)
-		{
-			//
-			// Set the view transform matrix
-			//
-			// Set the eye point
-			D3DXVECTOR3 vEyePt((float)viewpoint1_x, (float)(-viewpoint1_y >> LOG_PRECISION), (float)viewpoint1_z);
-			// Set the lookat point
-			D3DXMATRIX carMtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
-			D3DXVECTOR3 vLookatPt(carMtx._41, carMtx._42, carMtx._43);
-			D3DXMatrixLookAtLH(&matView, &vEyePt, &vLookatPt, &vUpVec);
-
-			pd3dDevice->SetTransform(D3DTS_VIEW, &matView);
-		}
 #else
 		if (frameCount > 0)
-			--frameCount;
-
-		if (frameCount == 0)
+			--frameCount;		if (frameCount == 0)
 		{
 			frameCount = frameGap;
 
@@ -1351,6 +1374,15 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 		// NOTE: viewpoint1_y must be preserved for use by DrawBackdrop
 		viewpoint1_z >>= LOG_PRECISION;
 
+#ifdef SMOOTH
+		// Update camera position interpolator for track preview AFTER scaling
+		// Note: viewpoint1_y is NOT scaled (preserved for DrawBackdrop), so scale it here
+		if (GameMode == TRACK_PREVIEW)
+		{
+			CameraPositionInterpolator.Update(viewpoint1_x, viewpoint1_y >> LOG_PRECISION, viewpoint1_z);
+		}
+#endif
+
 		target_x >>= LOG_PRECISION;
 		target_y = -target_y;
 		target_y >>= LOG_PRECISION;
@@ -1375,6 +1407,14 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 		}
 		else
 		{
+			// Track preview: interpolate both camera position and lookat (camera positions already scaled)
+			// Interpolate camera position
+			long cam_x, cam_y, cam_z;
+			CameraPositionInterpolator.GetInterpolated(GameTicker.TickPercent, cam_x, cam_y, cam_z);
+			vEyePt.x = static_cast<float>(cam_x);
+			vEyePt.y = static_cast<float>(-cam_y);
+			vEyePt.z = static_cast<float>(cam_z);
+			// Interpolate lookat position
 			D3DXMATRIX carMtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
 			vLookatPt.x = carMtx._41;
 			vLookatPt.y = carMtx._42;
@@ -1541,6 +1581,16 @@ static void HandleTrackMenu( CDXUTTextHelper &txtHelper )
 		ResetPlayer();		// Also reset player to clear values if there was a previous game (CarBehaviour normally does this, but isn't called for track preview)
         GameMode = TRACK_PREVIEW;
 		bPlayerPaused = bOpponentPaused = FALSE;
+#ifdef SMOOTH
+		// Initialize camera position interpolator to avoid first-frame jump
+		CalcTrackPreviewViewpoint();
+		SetOpponentsCarWorldTransform();
+		long scaled_x = viewpoint1_x >> LOG_PRECISION;
+		long scaled_y = viewpoint1_y >> LOG_PRECISION;
+		long scaled_z = viewpoint1_z >> LOG_PRECISION;
+		CameraPositionInterpolator.Update(scaled_x, scaled_y, scaled_z);
+		CameraPositionInterpolator.Update(scaled_x, scaled_y, scaled_z);  // Set both old and new to same value
+#endif
 		keyPress = '\0';
 	}
 	
@@ -1929,20 +1979,18 @@ void CALLBACK OnFrameRender( IDirect3DDevice9 *pd3dDevice, double fTime, float f
 			case TRACK_MENU:
 				break;
 
-			case TRACK_PREVIEW:
-			{
-				// Draw Opponent's Car
+		case TRACK_PREVIEW:
+		{
+			// Draw Opponent's Car
 #ifdef SMOOTH
-				D3DMATRIX mtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
-				pd3dDevice->SetTransform(D3DTS_WORLD, &mtx);
+			D3DMATRIX mtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
+			pd3dDevice->SetTransform(D3DTS_WORLD, &mtx);
 #else
-				pd3dDevice->SetTransform(D3DTS_WORLD, &matWorldOpponentsCar);
+			pd3dDevice->SetTransform(D3DTS_WORLD, &matWorldOpponentsCar);
 #endif
-				DrawCar(pd3dDevice);
-			}
-				break;
-
-			case GAME_IN_PROGRESS:
+			DrawCar(pd3dDevice);
+		}
+			break;			case GAME_IN_PROGRESS:
 			case GAME_OVER:
 			{
 				// Draw Opponent's Car
