@@ -1215,6 +1215,9 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 	if (lastFrame < FPSMAX)
 		return;
 	lastFrame -= FPSMAX;
+	// After FPS cap, use fixed timestep for frame logic to ensure consistent timing
+	// regardless of display refresh rate (fixes slow motion bug on 165Hz/240Hz displays)
+	fElapsedTime = FPSMAX;
 #endif
 	bFrameMoved = FALSE;
 //	VALUE3 = frameGap;
@@ -1294,7 +1297,9 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 
 #else
 		if (frameCount > 0)
-			--frameCount;		if (frameCount == 0)
+			--frameCount;
+
+		if (frameCount == 0)
 		{
 			frameCount = frameGap;
 
