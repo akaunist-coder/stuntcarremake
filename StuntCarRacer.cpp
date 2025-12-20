@@ -93,6 +93,9 @@ static bool bFrameMoved = FALSE;
 
 bool bShowStats = FALSE;
 bool bNewGame = FALSE;
+#ifdef SMOOTH
+static bool bNeedInterpolatorInit = FALSE;
+#endif
 bool bPaused = FALSE;
 bool bPlayerPaused = FALSE;
 bool bOpponentPaused = FALSE;
@@ -1166,6 +1169,53 @@ long GetCurrentGameTick()
 }
 
 #ifdef SMOOTH
+// Helper functions for interpolator initialization (call twice to set old=new)
+static void InitializeBackdropInterpolator(long x_angle, long y_angle, long z_angle)
+{
+	BackdropAngleInterpolator.UpdateAngles(x_angle, y_angle, z_angle);
+	BackdropAngleInterpolator.UpdateAngles(x_angle, y_angle, z_angle);
+}
+
+static void InitializeCameraPositionInterpolator(long x, long y, long z)
+{
+	CameraPositionInterpolator.Update(x, y, z);
+	CameraPositionInterpolator.Update(x, y, z);
+}
+
+static void InitializeViewMatrixInterpolator()
+{
+	D3DXMATRIX matTrans, matRot, matTemp;
+	D3DXMatrixTranslation(&matTrans, static_cast<float>(-viewpoint1_x), static_cast<float>(viewpoint1_y>>LOG_PRECISION), static_cast<float>(-viewpoint1_z));
+	D3DXMatrixIdentity(&matRot);
+	float xa = ((static_cast<float>(-viewpoint1_x_angle) * 2 * D3DX_PI) / 65536.0f);
+	float ya = ((static_cast<float>(-viewpoint1_y_angle) * 2 * D3DX_PI) / 65536.0f);
+	float za = ((static_cast<float>(-viewpoint1_z_angle) * 2 * D3DX_PI) / 65536.0f);
+	D3DXMatrixRotationY(&matTemp, ya);
+	D3DXMatrixMultiply(&matRot, &matRot, &matTemp);
+	D3DXMatrixRotationX(&matTemp, xa);
+	D3DXMatrixMultiply(&matRot, &matRot, &matTemp);
+	D3DXMatrixRotationZ(&matTemp, za);
+	D3DXMatrixMultiply(&matRot, &matRot, &matTemp);
+	InterpolatorView.UpdateMatrices(matTrans, matRot);
+	InterpolatorView.UpdateMatrices(matTrans, matRot);
+}
+
+static void InitializeOpponentCarInterpolator()
+{
+	SetOpponentsCarWorldTransform();
+	SetOpponentsCarWorldTransform();
+}
+
+static void ResetOpponentCarInterpolator()
+{
+	D3DXMATRIX identity;
+	D3DXMatrixIdentity(&identity);
+	InterpolatorCarOpponent.UpdateMatrices(identity, identity);
+	InterpolatorCarOpponent.UpdateMatrices(identity, identity);
+}
+#endif
+
+#ifdef SMOOTH
 struct Ticker
 {
 	Ticker(float newFPS)
@@ -1214,6 +1264,27 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 	static long frameCount = 0;
 	DWORD input = lastInput;	// take copy of user input
 	D3DXMATRIX matRot, matTemp, matTrans, matView;
+
+#ifdef SMOOTH
+	// Initialize interpolators on first frame to avoid flash
+	static bool firstFrame = true;
+	if (firstFrame)
+	{
+		firstFrame = false;
+		// Calculate initial viewpoint for track menu
+		CalcTrackMenuViewpoint();
+		InitializeBackdropInterpolator(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+		
+		// Initialize camera position interpolator with scaled track menu camera position
+		long scaled_x = viewpoint1_x >> LOG_PRECISION;
+		long scaled_y = viewpoint1_y >> LOG_PRECISION;
+		long scaled_z = viewpoint1_z >> LOG_PRECISION;
+		InitializeCameraPositionInterpolator(scaled_x, scaled_y, scaled_z);
+		
+		// Initialize opponent car interpolator to identity
+		ResetOpponentCarInterpolator();
+	}
+#endif
 
 #ifndef linux
 	// crude 60fps cap method...
@@ -1364,6 +1435,35 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 
 		LimitViewpointY(&player1_y);
 	}
+
+#ifdef SMOOTH
+	// Initialize interpolators after opponent/car positioning on first frame
+	if (bNeedInterpolatorInit)
+	{
+		if (GameMode == GAME_IN_PROGRESS)
+		{
+			bNeedInterpolatorInit = FALSE;
+			CalcGameViewpoint();
+			InitializeBackdropInterpolator(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+			InitializeViewMatrixInterpolator();
+		}
+		else if (GameMode == TRACK_PREVIEW)
+		{
+			bNeedInterpolatorInit = FALSE;
+			
+			// Calculate track preview viewpoint based on opponent position
+			CalcTrackPreviewViewpoint();
+			InitializeOpponentCarInterpolator();
+			
+			// Initialize camera position interpolator with scaled viewpoint
+			long scaled_x = viewpoint1_x >> LOG_PRECISION;
+			long scaled_y = viewpoint1_y >> LOG_PRECISION;
+			long scaled_z = viewpoint1_z >> LOG_PRECISION;
+			InitializeCameraPositionInterpolator(scaled_x, scaled_y, scaled_z);
+			InitializeBackdropInterpolator(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+		}
+	}
+#endif
 
 	if ((GameMode == TRACK_MENU) || (GameMode == TRACK_PREVIEW))
 	{
@@ -1595,14 +1695,8 @@ static void HandleTrackMenu( CDXUTTextHelper &txtHelper )
         GameMode = TRACK_PREVIEW;
 		bPlayerPaused = bOpponentPaused = FALSE;
 #ifdef SMOOTH
-		// Initialize camera position interpolator to avoid first-frame jump
-		CalcTrackPreviewViewpoint();
-		SetOpponentsCarWorldTransform();
-		long scaled_x = viewpoint1_x >> LOG_PRECISION;
-		long scaled_y = viewpoint1_y >> LOG_PRECISION;
-		long scaled_z = viewpoint1_z >> LOG_PRECISION;
-		CameraPositionInterpolator.Update(scaled_x, scaled_y, scaled_z);
-		CameraPositionInterpolator.Update(scaled_x, scaled_y, scaled_z);  // Set both old and new to same value
+		// Defer interpolator initialization until after opponent is positioned
+		bNeedInterpolatorInit = TRUE;
 #endif
 		keyPress = '\0';
 	}
@@ -1662,6 +1756,10 @@ static void HandleTrackPreview( CDXUTTextHelper &txtHelper )
 		}
 		boostUnit = 0;
 		bPlayerPaused = bOpponentPaused = FALSE;
+#ifdef SMOOTH
+		// Set flag to initialize interpolators after CarBehaviour positions the car
+		bNeedInterpolatorInit = TRUE;
+#endif
 		keyPress = '\0';
 	}
 
@@ -2168,7 +2266,9 @@ void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUse
 			}
 #else
 			// In classic mode: decrease frameGap (faster gameplay)
-			if (frameGap > 1) frameGap--;
+			if (frameGap > 1) {
+				frameGap--;
+			}
 #endif
 			break;
 
@@ -2205,6 +2305,14 @@ void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUse
 
 				// reset all animated objects
 				ResetDrawBridge();
+				
+#ifdef SMOOTH
+				// Reset interpolators when returning to menu to prevent flash on next game start
+				CalcTrackMenuViewpoint();
+				InitializeBackdropInterpolator(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+				InitializeViewMatrixInterpolator();
+				ResetOpponentCarInterpolator();
+#endif
 			}
             break;
 
