@@ -48,6 +48,10 @@ extern void UpdateInterpolatedShadow(float t);
 #define DEFAULT_FRAME_GAP	(5)
 #endif
 
+#ifdef SMOOTH
+#define DEFAULT_SMOOTH_PHYSICS_RATE (10.0f)	// Default physics rate for SMOOTH mode (Hz)
+#endif
+
 // Game timing notes:
 // - Original Amiga PAL: 50Hz / 6 frame gap = 8.333 updates/sec (0.12 sec/tick)
 // - NTSC standard: 60Hz / 8 frame gap = 7.5 updates/sec (0.1333 sec/tick)
@@ -82,6 +86,9 @@ IDirect3DTexture9 *g_pAtlas = NULL;
 int wideScreen = 0;
 
 static long frameGap = DEFAULT_FRAME_GAP;
+#ifdef SMOOTH
+static float smoothPhysicsRate = DEFAULT_SMOOTH_PHYSICS_RATE; // Physics rate for SMOOTH mode (Hz)
+#endif
 static bool bFrameMoved = FALSE;
 
 bool bShowStats = FALSE;
@@ -1196,7 +1203,8 @@ struct Ticker
 };
 
 
-Ticker GameTicker(10.0f);
+// Initialize with smoothPhysicsRate so F9/F10 can adjust it
+Ticker GameTicker(smoothPhysicsRate);
 Ticker SoundTicker(50.0f);
 #endif
 
@@ -1775,9 +1783,13 @@ void RenderText( double fTime )
 			txtHelper.DrawFormattedTextLine( L"L %s", lastLapStr );
 			
 #if defined(DEBUG) || defined(_DEBUG)
-			// FrameGap indicator - top right corner (debug only)
+			// Physics rate indicator - top right corner
 			txtHelper.SetInsertionPos( static_cast<int>((pd3dsdBackBuffer->Width - 80 * textScale)), static_cast<int>(10 * textScale) );
+#ifdef SMOOTH
+			txtHelper.DrawFormattedTextLine( L"Hz:%.1f", smoothPhysicsRate );
+#else
 			txtHelper.DrawFormattedTextLine( L"FG:%d", frameGap );
+#endif
 #endif
 
 			txtHelper.End();
@@ -2148,11 +2160,29 @@ void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUse
             break;
 
 		case VK_F9:
+#ifdef SMOOTH
+			// In SMOOTH mode: increase physics rate (faster gameplay)
+			if (smoothPhysicsRate < 15.0f) {
+				smoothPhysicsRate += 1.0f;
+				GameTicker.SetTargetFPS(smoothPhysicsRate);
+			}
+#else
+			// In classic mode: decrease frameGap (faster gameplay)
 			if (frameGap > 1) frameGap--;
+#endif
 			break;
 
 		case VK_F10:
+#ifdef SMOOTH
+			// In SMOOTH mode: decrease physics rate (slower gameplay)
+			if (smoothPhysicsRate > 5.0f) {
+				smoothPhysicsRate -= 1.0f;
+				GameTicker.SetTargetFPS(smoothPhysicsRate);
+			}
+#else
+			// In classic mode: increase frameGap (slower gameplay)
 			frameGap++;
+#endif
 			break;
 
 #if defined(DEBUG) || defined(_DEBUG)
@@ -2160,6 +2190,7 @@ void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUse
 			bOutsideView = !bOutsideView;
             break;
 #endif
+			
 		case 'M':
 			if (GameMode != TRACK_MENU)
 			{
