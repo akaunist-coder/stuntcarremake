@@ -557,7 +557,7 @@ bool CALLBACK IsDeviceAcceptable( D3DCAPS9 *pCaps, D3DFORMAT AdapterFormat,
 {
     // Typically want to skip backbuffer formats that don't support alpha blending
     IDirect3D9 *pD3D = DXUTGetD3DObject(); 
-    if( FAILED( pD3D->CheckDeviceFormat( pCaps->AdapterOrdinal, pCaps->DeviceType,
+    if ( FAILED( pD3D->CheckDeviceFormat( pCaps->AdapterOrdinal, pCaps->DeviceType,
                     AdapterFormat, D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING, 
                     D3DRTYPE_TEXTURE, BackBufferFormat ) ) )
         return false;
@@ -573,10 +573,10 @@ bool CALLBACK ModifyDeviceSettings( DXUTDeviceSettings *pDeviceSettings, const D
 {
     // For the first device created if its a REF device, optionally display a warning dialog box
     static bool s_bFirstTime = true;
-    if( s_bFirstTime )
+    if (s_bFirstTime)
     {
         s_bFirstTime = false;
-        if( pDeviceSettings->DeviceType == D3DDEVTYPE_REF )
+        if ( pDeviceSettings->DeviceType == D3DDEVTYPE_REF )
             DXUTDisplaySwitchingToREFWarning();
     }
 
@@ -626,12 +626,12 @@ HRESULT CALLBACK OnResetDevice( IDirect3DDevice9 *pd3dDevice,
 //    V_RETURN( g_SettingsDlg.OnResetDevice() );
 
     // Recreate fonts with proper scaling for new resolution
-	if( g_pFont )
+	if (g_pFont)
 	{
 		g_pFont->Release();
 		g_pFont = NULL;
 	}
-	if( g_pFontLarge )
+	if (g_pFontLarge)
 	{
 		g_pFontLarge->Release();
 		g_pFontLarge = NULL;
@@ -1668,7 +1668,7 @@ void CALLBACK OnFrameRender( IDirect3DDevice9 *pd3dDevice, double fTime, float f
     V( pd3dDevice->Clear(0, NULL, D3DCLEAR_ZBUFFER, 0, 1.0f, 0) );
 
     // Render the scene
-    if( SUCCEEDED( pd3dDevice->BeginScene() ) )
+    if ( SUCCEEDED( pd3dDevice->BeginScene() ) )
     {
 		// Disable Z buffer and polygon culling, ready for DrawBackdrop()
 		pd3dDevice->SetRenderState( D3DRS_ZENABLE, FALSE );
@@ -1803,100 +1803,100 @@ LRESULT CALLBACK MsgProc( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 //--------------------------------------------------------------------------------------
 void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUserContext )
 {
-    if( bKeyDown )
+    if (bKeyDown)
     {
 		keyPress = nChar;
-        switch( nChar )
+        switch(nChar)
         {
 #if defined(DEBUG) || defined(_DEBUG)
-        case VK_F1:
-            bTestKey = !bTestKey;
-            break;
+			case VK_F1:
+				bTestKey = !bTestKey;
+				break;
 #endif
-        case VK_F2:
-            ++bTrackDrawMode;
-			if (bTrackDrawMode > 1) bTrackDrawMode = 0;
-			DXUTReset3DEnvironment();
-            break;
+			case VK_F2:
+				++bTrackDrawMode;
+				if (bTrackDrawMode > 1) bTrackDrawMode = 0;
+				DXUTReset3DEnvironment();
+				break;
 
-        case VK_F4:
-            NextSceneryType();
-            break;
+			case VK_F4:
+				NextSceneryType();
+				break;
 
-        case VK_F5:
-            bShowStats = !bShowStats;
-            break;
+			case VK_F5:
+				bShowStats = !bShowStats;
+				break;
 
-        case VK_F6:
-            bPlayerPaused = !bPlayerPaused;
-            break;
+			case VK_F6:
+				bPlayerPaused = !bPlayerPaused;
+				break;
 
-        case VK_F7:
-            bOpponentPaused = !bOpponentPaused;
-            break;
+			case VK_F7:
+				bOpponentPaused = !bOpponentPaused;
+				break;
 
-		case VK_F9:
-			if (frameGap > 1) frameGap--;
-			break;
+			case VK_F9:
+				if (frameGap > 1) frameGap--;
+				break;
 
-		case VK_F10:
-			frameGap++;
-			break;
+			case VK_F10:
+				frameGap++;
+				break;
 
 #if defined(DEBUG) || defined(_DEBUG)
-		case VK_BACK:
-			bOutsideView = !bOutsideView;
-            break;
+			case VK_BACK:
+				bOutsideView = !bOutsideView;
+				break;
 #endif
-		case 'M':
-			if (GameMode != TRACK_MENU)
-			{
-				GameMode = TRACK_MENU;
+			case 'M':
+				if (GameMode != TRACK_MENU)
+				{
+					GameMode = TRACK_MENU;
 
-				opponentsID = NO_OPPONENT;
+					opponentsID = NO_OPPONENT;
 
-				// Reset pause state when returning to menu
+					// Reset pause state when returning to menu
+					bPaused = FALSE;
+					bPlayerPaused = FALSE;
+					bOpponentPaused = FALSE;
+
+					// reset all animated objects
+					ResetDrawBridge();
+				}
+				break;
+
+			case 'O':
 				bPaused = FALSE;
-				bPlayerPaused = FALSE;
-				bOpponentPaused = FALSE;
+				break;
 
-				// reset all animated objects
-				ResetDrawBridge();
-			}
-            break;
+			case 'P':
+				bPaused = TRUE;
+				break;
 
-		case 'O':
-			bPaused = FALSE;
-            break;
+			case 'Z':
+				bNewGame = TRUE;		// for testing to try stopping car positioning bug
+				break;
 
-		case 'P':
-			bPaused = TRUE;
-            break;
+			// controls for Car Behaviour, Player 1
+			case VK_LEFT:
+				lastInput |= KEY_P1_LEFT;
+				break;
 
-		case 'Z':
-			bNewGame = TRUE;		// for testing to try stopping car positioning bug
-            break;
+			case VK_RIGHT:
+				lastInput |= KEY_P1_RIGHT;
+				break;
 
-		// controls for Car Behaviour, Player 1
-        case VK_LEFT:
-            lastInput |= KEY_P1_LEFT;
-            break;
+			case VK_SPACE:
+				lastInput |= KEY_P1_BOOST;
+				break;
 
-        case VK_RIGHT:
-            lastInput |= KEY_P1_RIGHT;
-            break;
+			case VK_DOWN:
+				lastInput |= KEY_P1_BRAKE;
+				break;
 
-        case VK_SPACE:
-            lastInput |= KEY_P1_BOOST;
-            break;
-
-		case VK_DOWN:
-            lastInput |= KEY_P1_BRAKE;
-            break;
-
-        case VK_UP:
-            lastInput |= KEY_P1_ACCEL;
-            break;
+			case VK_UP:
+				lastInput |= KEY_P1_ACCEL;
+				break;
         }
 
 #ifdef NOT_USED
@@ -1914,28 +1914,28 @@ void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUse
 	else
 	{
 		keyPress = '\0';
-        switch( nChar )
+        switch(nChar)
         {
-		// controls for Car Behaviour, Player 1
-        case VK_LEFT:
-            lastInput &= ~KEY_P1_LEFT;
-            break;
+			// controls for Car Behaviour, Player 1
+			case VK_LEFT:
+				lastInput &= ~KEY_P1_LEFT;
+				break;
 
-        case VK_RIGHT:
-            lastInput &= ~KEY_P1_RIGHT;
-            break;
+			case VK_RIGHT:
+				lastInput &= ~KEY_P1_RIGHT;
+				break;
 
-        case VK_SPACE:	// couldn't find VK_ definition for HASH key
-            lastInput &= ~KEY_P1_BOOST;
-            break;
+			case VK_SPACE:	// couldn't find VK_ definition for HASH key
+				lastInput &= ~KEY_P1_BOOST;
+				break;
 
-		case VK_DOWN:
-            lastInput &= ~KEY_P1_BRAKE;
-            break;
+			case VK_DOWN:
+				lastInput &= ~KEY_P1_BRAKE;
+				break;
 
-        case VK_UP:
-            lastInput &= ~KEY_P1_ACCEL;
-            break;
+			case VK_UP:
+				lastInput &= ~KEY_P1_ACCEL;
+				break;
 		}
 	}
 }
@@ -1949,9 +1949,9 @@ void CALLBACK OnLostDevice( void *pUserContext )
 //    g_DialogResourceManager.OnLostDevice();
 //    g_SettingsDlg.OnLostDevice();
 //    CDXUTDirectionWidget::StaticOnLostDevice();
-    if( g_pFont )
+    if (g_pFont)
         g_pFont->OnLostDevice();
-    if( g_pFontLarge )
+    if (g_pFontLarge)
         g_pFontLarge->OnLostDevice();
     SAFE_RELEASE(g_pSprite);
 
