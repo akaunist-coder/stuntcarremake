@@ -1736,6 +1736,15 @@ static void HandleTrackPreview( CDXUTTextHelper &txtHelper )
 	{
 		bNewGame = TRUE;
         GameMode = GAME_IN_PROGRESS;
+
+		// Trigger a resize message to ensure proper text positioning from the start
+		HWND hWnd = DXUTGetHWND();
+		if (hWnd)
+		{
+			RECT rect;
+			GetWindowRect(hWnd, &rect);
+			SendMessage(hWnd, WM_SIZING, WMSZ_BOTTOMRIGHT, (LPARAM)&rect);
+		}
 		// initialise game data
 		ResetLapData(OPPONENT);
 		ResetLapData(PLAYER);
