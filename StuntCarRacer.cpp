@@ -1230,17 +1230,27 @@ struct Ticker
 		TickFraction = 0.0f;
 		TickPercent = 0.0f;
 		DoFrame = true;
+		TicksAccumulated = 0;
 	}
 
 	void Update(float elapsedSeconds)
 	{
+		// Cap elapsed time to avoid a spiral of catch-up ticks after pauses or stutter.
+		// At most allow catching up 4 ticks worth of time; anything beyond is discarded.
+		const float maxAccumulation = TickDuration * 4.0f;
+		if (elapsedSeconds > maxAccumulation)
+			elapsedSeconds = maxAccumulation;
+
 		TickFraction += elapsedSeconds;
 
-		float fullFrames = TickFraction / TickDuration;
-		DoFrame = fullFrames >= 1.0f;
-
-		if (DoFrame)
+		// Count how many full ticks are due (drain the accumulator fully)
+		TicksAccumulated = 0;
+		while (TickFraction >= TickDuration)
+		{
 			TickFraction -= TickDuration;
+			++TicksAccumulated;
+		}
+		DoFrame = TicksAccumulated > 0;
 
 		TickPercent = TickFraction / TickDuration;
 	}
@@ -1250,6 +1260,7 @@ struct Ticker
 	float TickFraction;
 	float TickPercent;
 	bool  DoFrame;
+	int   TicksAccumulated;  // number of physics ticks due this frame (normally 0 or 1)
 };
 
 
