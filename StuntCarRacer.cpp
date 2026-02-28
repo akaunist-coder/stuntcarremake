@@ -924,6 +924,9 @@ struct AngleInterpolator
 	long old_x_angle, old_y_angle, old_z_angle;
 	long new_x_angle, new_y_angle, new_z_angle;
 
+	AngleInterpolator() : old_x_angle(0), old_y_angle(0), old_z_angle(0),
+		new_x_angle(0), new_y_angle(0), new_z_angle(0) {}
+
 	void UpdateAngles(long x_angle, long y_angle, long z_angle)
 	{
 		old_x_angle = new_x_angle;
@@ -1029,6 +1032,14 @@ struct MTXInterpolator
 	D3DXMATRIX oldMatTrans, newMatTrans;
 	D3DXQUATERNION oldQuatRot, newQuatRot;
 
+	MTXInterpolator()
+	{
+		D3DXMatrixIdentity(&oldMatTrans);
+		D3DXMatrixIdentity(&newMatTrans);
+		oldQuatRot = D3DXQUATERNION(0, 0, 0, 1);
+		newQuatRot = D3DXQUATERNION(0, 0, 0, 1);
+	}
+
 	void UpdateMatrices(const D3DMATRIX& newTrans, const D3DMATRIX& newRot)
 	{
 		oldMatTrans = newMatTrans;
@@ -1067,6 +1078,9 @@ struct Vec3Interpolator
 {
 	long old_x, old_y, old_z;
 	long new_x, new_y, new_z;
+
+	Vec3Interpolator() : old_x(0), old_y(0), old_z(0),
+		new_x(0), new_y(0), new_z(0) {}
 
 	void Update(long x, long y, long z)
 	{
