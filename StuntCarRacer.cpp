@@ -1220,6 +1220,10 @@ struct Ticker
 {
 	Ticker(float newFPS)
 	{
+		TickFraction = 0.0f;
+		TickPercent = 0.0f;
+		TicksAccumulated = 0;
+		DoFrame = true;
 		SetTargetFPS(newFPS);
 	}
 
@@ -1227,10 +1231,12 @@ struct Ticker
 	{
 		TargetFPS = newFPS;
 		TickDuration = 1.0f / TargetFPS;
-		TickFraction = 0.0f;
-		TickPercent = 0.0f;
-		DoFrame = true;
-		TicksAccumulated = 0;
+		// Preserve the existing fraction so changing rate doesn't cause a skip,
+		// but clamp it to just under one tick so we don't fire immediately.
+		if (TickFraction >= TickDuration)
+			TickFraction = TickDuration - 0.0001f;
+		TickPercent = TickFraction / TickDuration;
+		DoFrame = false;
 	}
 
 	void Update(float elapsedSeconds)
