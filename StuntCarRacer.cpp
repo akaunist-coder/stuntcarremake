@@ -37,10 +37,19 @@
 // Defines, constants, and global variables
 //-----------------------------------------------------------------------------
 
+#ifdef SMOOTH
+// Forward declaration for smooth shadow rendering
+extern void UpdateInterpolatedShadow(float t);
+#endif
+
 #ifdef linux
 #define DEFAULT_FRAME_GAP	(6)		// 4 Used to limit frame rate.  Amiga StuntCarRacer uses value of 6 (called MIN.FRAMES)
 #else
 #define DEFAULT_FRAME_GAP	(5)
+#endif
+
+#ifdef SMOOTH
+#define DEFAULT_SMOOTH_PHYSICS_RATE (10.0f)	// Default physics rate for SMOOTH mode (Hz)
 #endif
 
 // Game timing notes:
@@ -57,7 +66,7 @@
 
 #define	FURTHEST_Z (131072.0f)
 
-GameModeType GameMode = TRACK_MENU;
+GameModeType GameMode = TITLE_SCREEN;
 
 // Both the following are used for keyboard input
 UINT keyPress = '\0';
@@ -73,14 +82,21 @@ IDirectSoundBuffer8 *OffRoadSoundBuffer = NULL;
 IDirectSoundBuffer8 *EngineSoundBuffers[8] = {NULL};
 
 IDirect3DTexture9 *g_pAtlas = NULL;
+static IDirect3DTexture9 *g_pTitleScreen = NULL;
 
 int wideScreen = 0;
 
 static long frameGap = DEFAULT_FRAME_GAP;
+#ifdef SMOOTH
+static float smoothPhysicsRate = DEFAULT_SMOOTH_PHYSICS_RATE; // Physics rate for SMOOTH mode (Hz)
+#endif
 static bool bFrameMoved = FALSE;
 
 bool bShowStats = FALSE;
 bool bNewGame = FALSE;
+#ifdef SMOOTH
+static bool bNeedInterpolatorInit = FALSE;
+#endif
 bool bPaused = FALSE;
 bool bPlayerPaused = FALSE;
 bool bOpponentPaused = FALSE;
@@ -655,6 +671,12 @@ HRESULT CALLBACK OnResetDevice( IDirect3DDevice9 *pd3dDevice,
 		return E_FAIL;
 	}
 
+	if (FAILED(D3DXCreateTextureFromFile(pd3dDevice, L"Bitmap\\stunt_car_racer_title_screen.png", &g_pTitleScreen)))
+	{
+		OutputDebugStringW(L"WARNING: Failed to load title screen texture\n");
+		// Non-fatal - game can proceed without title screen
+	}
+
 	InitAtlasCoord();
 
 	if ((hr = CreatePolygonVertexBuffer(pd3dDevice)) != S_OK)
@@ -899,6 +921,60 @@ static void CalcTrackPreviewViewpoint( void )
 }
 
 /*	======================================================================================= */
+/*	Backdrop angle smoothing															*/
+/*	======================================================================================= */
+
+#ifdef SMOOTH
+// Backdrop angle smoothing
+struct AngleInterpolator
+{
+	long old_x_angle, old_y_angle, old_z_angle;
+	long new_x_angle, new_y_angle, new_z_angle;
+
+	AngleInterpolator() : old_x_angle(0), old_y_angle(0), old_z_angle(0),
+		new_x_angle(0), new_y_angle(0), new_z_angle(0) {}
+
+	void UpdateAngles(long x_angle, long y_angle, long z_angle)
+	{
+		old_x_angle = new_x_angle;
+		old_y_angle = new_y_angle;
+		old_z_angle = new_z_angle;
+
+		new_x_angle = x_angle;
+		new_y_angle = y_angle;
+		new_z_angle = z_angle;
+	}
+
+	// Helper to compute shortest angle difference considering wrapping
+	long AngleDiff(long from, long to)
+	{
+		long diff = to - from;
+		// Normalize to [-MAX_ANGLE/2, MAX_ANGLE/2] to take shortest path
+		if (diff > MAX_ANGLE / 2)
+			diff -= MAX_ANGLE;
+		else if (diff < -MAX_ANGLE / 2)
+			diff += MAX_ANGLE;
+		return diff;
+	}
+
+	void GetInterpolatedAngles(float f, long& out_x, long& out_y, long& out_z)
+	{
+		// Use shortest path for angle interpolation
+		out_x = old_x_angle + static_cast<long>(f * AngleDiff(old_x_angle, new_x_angle));
+		out_y = old_y_angle + static_cast<long>(f * AngleDiff(old_y_angle, new_y_angle));
+		out_z = old_z_angle + static_cast<long>(f * AngleDiff(old_z_angle, new_z_angle));
+		
+		// Ensure angles stay in valid range [0, MAX_ANGLE)
+		out_x = (out_x + MAX_ANGLE) % MAX_ANGLE;
+		out_y = (out_y + MAX_ANGLE) % MAX_ANGLE;
+		out_z = (out_z + MAX_ANGLE) % MAX_ANGLE;
+	}
+};
+
+AngleInterpolator BackdropAngleInterpolator;
+#endif
+
+/*	======================================================================================= */
 /*	Function:		CalcGameViewpoint														*/
 /*																							*/
 /*	Description:	*/
@@ -947,13 +1023,96 @@ long x_offset, y_offset, z_offset;
 		viewpoint1_y_angle = player1_y_angle;
 		viewpoint1_z_angle = player1_z_angle;
 	}
+
+#ifdef SMOOTH
+	// Update backdrop angle interpolator
+	BackdropAngleInterpolator.UpdateAngles(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+#endif
 }
 
 //--------------------------------------------------------------------------------------
 // Handle updates to the scene
 //--------------------------------------------------------------------------------------
-static D3DXMATRIX matWorldTrack, matWorldCar, matWorldOpponentsCar;
+#ifdef SMOOTH
+struct MTXInterpolator
+{
+	D3DXMATRIX oldMatTrans, newMatTrans;
+	D3DXQUATERNION oldQuatRot, newQuatRot;
 
+	MTXInterpolator()
+	{
+		D3DXMatrixIdentity(&oldMatTrans);
+		D3DXMatrixIdentity(&newMatTrans);
+		oldQuatRot = D3DXQUATERNION(0, 0, 0, 1);
+		newQuatRot = D3DXQUATERNION(0, 0, 0, 1);
+	}
+
+	void UpdateMatrices(const D3DMATRIX& newTrans, const D3DMATRIX& newRot)
+	{
+		oldMatTrans = newMatTrans;
+		oldQuatRot = newQuatRot;
+
+		newMatTrans = newTrans;
+		D3DXMATRIX newRotX = newRot;
+		D3DXQuaternionRotationMatrix(&newQuatRot, &newRotX);
+	}
+
+	D3DXMATRIX CreateInterpolatedMtx(float f, bool view = false)
+	{
+		D3DXMATRIX result;
+		D3DXMATRIX trans = oldMatTrans + f * (newMatTrans - oldMatTrans);
+
+		D3DXQUATERNION rotQ;
+		D3DXQuaternionSlerp(&rotQ, &oldQuatRot, &newQuatRot, f);
+		D3DXMATRIX rot;
+		D3DXMatrixRotationQuaternion(&rot, &rotQ);
+
+		if (view)
+			D3DXMatrixMultiply(&result, &trans, &rot);
+		else
+			D3DXMatrixMultiply(&result, &rot, &trans);
+		return result;
+	}
+};
+
+
+MTXInterpolator InterpolatorView;
+MTXInterpolator InterpolatorCarOwn;
+MTXInterpolator InterpolatorCarOpponent;
+
+// Camera position interpolator for track preview
+struct Vec3Interpolator
+{
+	long old_x, old_y, old_z;
+	long new_x, new_y, new_z;
+
+	Vec3Interpolator() : old_x(0), old_y(0), old_z(0),
+		new_x(0), new_y(0), new_z(0) {}
+
+	void Update(long x, long y, long z)
+	{
+		old_x = new_x;
+		old_y = new_y;
+		old_z = new_z;
+		new_x = x;
+		new_y = y;
+		new_z = z;
+	}
+
+	void GetInterpolated(float t, long& out_x, long& out_y, long& out_z)
+	{
+		out_x = old_x + static_cast<long>((new_x - old_x) * t);
+		out_y = old_y + static_cast<long>((new_y - old_y) * t);
+		out_z = old_z + static_cast<long>((new_z - old_z) * t);
+	}
+};
+
+Vec3Interpolator CameraPositionInterpolator;
+
+static D3DXMATRIX matWorldTrack;
+#else
+static D3DXMATRIX matWorldTrack, matWorldCar, matWorldOpponentsCar;
+#endif
 
 static void SetCarWorldTransform( void )
 {
@@ -974,9 +1133,13 @@ D3DXMATRIX matRot, matTemp, matTrans;
 	// Position car slightly higher than wheel height (VCAR_HEIGHT/4) so wheels are fully visible
 	D3DXMatrixTranslation( &matTrans, static_cast<float>(player1_x>>LOG_PRECISION), static_cast<float>(-player1_y>>LOG_PRECISION)+VCAR_HEIGHT/3, static_cast<float>(player1_z>>LOG_PRECISION) );
 	// Combine the rotation and translation matrices to complete the world matrix
+#ifdef SMOOTH
+	InterpolatorCarOwn.UpdateMatrices(matTrans, matRot);
+#else
 	D3DXMatrixMultiply(&matWorldCar, &matRot, &matTrans);
+#endif
+	
 }
-
 
 static void SetOpponentsCarWorldTransform( void )
 {
@@ -997,7 +1160,11 @@ D3DXMATRIX matRot, matTemp, matTrans;
 	// Position car at wheel height (VCAR_HEIGHT/4)
 	D3DXMatrixTranslation( &matTrans, static_cast<float>(opponent_x>>LOG_PRECISION), static_cast<float>(-opponent_y>>LOG_PRECISION)+VCAR_HEIGHT/4, static_cast<float>(opponent_z>>LOG_PRECISION) );
 	// Combine the rotation and translation matrices to complete the world matrix
+#ifdef SMOOTH
+	InterpolatorCarOpponent.UpdateMatrices(matTrans, matRot);
+#else
 	D3DXMatrixMultiply(&matWorldOpponentsCar, &matRot, &matTrans);
+#endif
 }
 
 
@@ -1022,12 +1189,144 @@ long GetCurrentGameTick()
 	return globalGameTicks;
 }
 
+#ifdef SMOOTH
+// Helper functions for interpolator initialization (call twice to set old=new)
+static void InitializeBackdropInterpolator(long x_angle, long y_angle, long z_angle)
+{
+	BackdropAngleInterpolator.UpdateAngles(x_angle, y_angle, z_angle);
+	BackdropAngleInterpolator.UpdateAngles(x_angle, y_angle, z_angle);
+}
+
+static void InitializeCameraPositionInterpolator(long x, long y, long z)
+{
+	CameraPositionInterpolator.Update(x, y, z);
+	CameraPositionInterpolator.Update(x, y, z);
+}
+
+static void InitializeViewMatrixInterpolator()
+{
+	D3DXMATRIX matTrans, matRot, matTemp;
+	D3DXMatrixTranslation(&matTrans, static_cast<float>(-viewpoint1_x), static_cast<float>(viewpoint1_y>>LOG_PRECISION), static_cast<float>(-viewpoint1_z));
+	D3DXMatrixIdentity(&matRot);
+	float xa = ((static_cast<float>(-viewpoint1_x_angle) * 2 * D3DX_PI) / 65536.0f);
+	float ya = ((static_cast<float>(-viewpoint1_y_angle) * 2 * D3DX_PI) / 65536.0f);
+	float za = ((static_cast<float>(-viewpoint1_z_angle) * 2 * D3DX_PI) / 65536.0f);
+	D3DXMatrixRotationY(&matTemp, ya);
+	D3DXMatrixMultiply(&matRot, &matRot, &matTemp);
+	D3DXMatrixRotationX(&matTemp, xa);
+	D3DXMatrixMultiply(&matRot, &matRot, &matTemp);
+	D3DXMatrixRotationZ(&matTemp, za);
+	D3DXMatrixMultiply(&matRot, &matRot, &matTemp);
+	InterpolatorView.UpdateMatrices(matTrans, matRot);
+	InterpolatorView.UpdateMatrices(matTrans, matRot);
+}
+
+static void InitializeOpponentCarInterpolator()
+{
+	SetOpponentsCarWorldTransform();
+	SetOpponentsCarWorldTransform();
+}
+
+static void ResetOpponentCarInterpolator()
+{
+	D3DXMATRIX identity;
+	D3DXMatrixIdentity(&identity);
+	InterpolatorCarOpponent.UpdateMatrices(identity, identity);
+	InterpolatorCarOpponent.UpdateMatrices(identity, identity);
+}
+#endif
+
+#ifdef SMOOTH
+struct Ticker
+{
+	Ticker(float newFPS)
+	{
+		TickFraction = 0.0f;
+		TickPercent = 0.0f;
+		TicksAccumulated = 0;
+		DoFrame = true;
+		SetTargetFPS(newFPS);
+	}
+
+	void SetTargetFPS(float newFPS)
+	{
+		TargetFPS = newFPS;
+		TickDuration = 1.0f / TargetFPS;
+		// Preserve the existing fraction so changing rate doesn't cause a skip,
+		// but clamp it to just under one tick so we don't fire immediately.
+		if (TickFraction >= TickDuration)
+			TickFraction = TickDuration - 0.0001f;
+		TickPercent = TickFraction / TickDuration;
+		DoFrame = false;
+	}
+
+	void Update(float elapsedSeconds)
+	{
+		// Cap elapsed time to avoid a spiral of catch-up ticks after pauses or stutter.
+		// At most allow catching up 4 ticks worth of time; anything beyond is discarded.
+		const float maxAccumulation = TickDuration * 4.0f;
+		if (elapsedSeconds > maxAccumulation)
+			elapsedSeconds = maxAccumulation;
+
+		TickFraction += elapsedSeconds;
+
+		// Count how many full ticks are due (drain the accumulator fully)
+		TicksAccumulated = 0;
+		while (TickFraction >= TickDuration)
+		{
+			TickFraction -= TickDuration;
+			++TicksAccumulated;
+		}
+		DoFrame = TicksAccumulated > 0;
+
+		TickPercent = TickFraction / TickDuration;
+	}
+
+	float TargetFPS;
+	float TickDuration;
+	float TickFraction;
+	float TickPercent;
+	bool  DoFrame;
+	int   TicksAccumulated;  // number of physics ticks due this frame (normally 0 or 1)
+};
+
+
+// Initialize with smoothPhysicsRate so F9/F10 can adjust it
+Ticker GameTicker(smoothPhysicsRate);
+Ticker SoundTicker(50.0f);
+#endif
+
 void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fElapsedTime, void *pUserContext )
 {
+	// Skip all game logic while on title screen
+	if (GameMode == TITLE_SCREEN)
+		return;
+
 	static D3DXVECTOR3 vUpVec( 0.0f, 1.0f, 0.0f );
 	static long frameCount = 0;
 	DWORD input = lastInput;	// take copy of user input
 	D3DXMATRIX matRot, matTemp, matTrans, matView;
+
+#ifdef SMOOTH
+	// Initialize interpolators on first frame to avoid flash
+	static bool firstFrame = true;
+	if (firstFrame)
+	{
+		firstFrame = false;
+		// Calculate initial viewpoint for track menu
+		CalcTrackMenuViewpoint();
+		InitializeBackdropInterpolator(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+		
+		// Initialize camera position interpolator with scaled track menu camera position
+		long scaled_x = viewpoint1_x >> LOG_PRECISION;
+		long scaled_y = viewpoint1_y >> LOG_PRECISION;
+		long scaled_z = viewpoint1_z >> LOG_PRECISION;
+		InitializeCameraPositionInterpolator(scaled_x, scaled_y, scaled_z);
+		
+		// Initialize opponent car interpolator to identity
+		ResetOpponentCarInterpolator();
+	}
+#endif
 
 #ifndef linux
 	// crude 60fps cap method...
@@ -1037,6 +1336,9 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 	if (lastFrame < FPSMAX)
 		return;
 	lastFrame -= FPSMAX;
+	// After FPS cap, use fixed timestep for frame logic to ensure consistent timing
+	// regardless of display refresh rate (fixes slow motion bug on 165Hz/240Hz displays)
+	fElapsedTime = FPSMAX;
 #endif
 	bFrameMoved = FALSE;
 //	VALUE3 = frameGap;
@@ -1072,28 +1374,65 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 	// Track preview and game mode run at reduced frame rate
 	if ((GameMode == TRACK_PREVIEW) || (GameMode == GAME_IN_PROGRESS))
 	{
+#ifdef SMOOTH
+		GameTicker.Update(fElapsedTime);
+		SoundTicker.Update(fElapsedTime);
+#endif
 		if (GameMode == GAME_IN_PROGRESS)
 		{
 			// Following function should run at 50Hz
+#ifdef SMOOTH
+			if (!bPaused && SoundTicker.DoFrame) FramesWheelsEngine(EngineSoundBuffers);
+#else
 			if (!bPaused) FramesWheelsEngine(EngineSoundBuffers);
+#endif
 		}
 
+#ifdef SMOOTH
+		if (!GameTicker.DoFrame)
+		{
+			if (GameMode == GAME_IN_PROGRESS)
+			{
+				D3DMATRIX viewMtx = InterpolatorView.CreateInterpolatedMtx(GameTicker.TickPercent, true);
+				pd3dDevice->SetTransform(D3DTS_VIEW, &viewMtx);
+			}
+			else if (GameMode == TRACK_PREVIEW)
+			{
+				// Set view matrix for track preview on interpolation frames
+				// Interpolate camera position (already scaled)
+				long cam_x, cam_y, cam_z;
+				CameraPositionInterpolator.GetInterpolated(GameTicker.TickPercent, cam_x, cam_y, cam_z);
+				D3DXVECTOR3 vEyePt(static_cast<float>(cam_x), static_cast<float>(-cam_y), static_cast<float>(cam_z));
+				// Lookat the interpolated car position
+				D3DXMATRIX carMtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
+				D3DXVECTOR3 vLookatPt(carMtx._41, carMtx._42, carMtx._43);
+				D3DXMatrixLookAtLH(&matView, &vEyePt, &vLookatPt, &vUpVec);
+				pd3dDevice->SetTransform(D3DTS_VIEW, &matView);
+			}
+			return;  // Early return for interpolation frames (no game logic)
+		}
+
+		// Increment game tick counter when game logic runs (every GameTicker.DoFrame)
+		if (!bPaused)
+		globalGameTicks++;
+
+#else
 		if (frameCount > 0)
 			--frameCount;
 
 		if (frameCount == 0)
 		{
 			frameCount = frameGap;
+
 			// Increment game tick counter (game logic updates once per frameGap frames)
 			if (!bPaused)
 				globalGameTicks++;
-			//DXUTPause( false, false );	//pausing doesn't work properly
 		}
 		else
 		{
-			//if (frameCount == frameGap-1) DXUTPause( true, true );	//pausing doesn't work properly
 			return;
 		}
+#endif
 	}
 	else if (GameMode == TRACK_MENU)
 	{
@@ -1139,6 +1478,35 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 		LimitViewpointY(&player1_y);
 	}
 
+#ifdef SMOOTH
+	// Initialize interpolators after opponent/car positioning on first frame
+	if (bNeedInterpolatorInit)
+	{
+		if (GameMode == GAME_IN_PROGRESS)
+		{
+			bNeedInterpolatorInit = FALSE;
+			CalcGameViewpoint();
+			InitializeBackdropInterpolator(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+			InitializeViewMatrixInterpolator();
+		}
+		else if (GameMode == TRACK_PREVIEW)
+		{
+			bNeedInterpolatorInit = FALSE;
+			
+			// Calculate track preview viewpoint based on opponent position
+			CalcTrackPreviewViewpoint();
+			InitializeOpponentCarInterpolator();
+			
+			// Initialize camera position interpolator with scaled viewpoint
+			long scaled_x = viewpoint1_x >> LOG_PRECISION;
+			long scaled_y = viewpoint1_y >> LOG_PRECISION;
+			long scaled_z = viewpoint1_z >> LOG_PRECISION;
+			InitializeCameraPositionInterpolator(scaled_x, scaled_y, scaled_z);
+			InitializeBackdropInterpolator(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+		}
+	}
+#endif
+
 	if ((GameMode == TRACK_MENU) || (GameMode == TRACK_PREVIEW))
 	{
 		if (GameMode == TRACK_MENU)
@@ -1151,10 +1519,24 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 			SetOpponentsCarWorldTransform();
 		}
 
+#ifdef SMOOTH
+		// Update backdrop angle interpolator
+		BackdropAngleInterpolator.UpdateAngles(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+#endif
+
 		// Set Direct3D transforms, ready for OnFrameRender
 		viewpoint1_x >>= LOG_PRECISION;
 		// NOTE: viewpoint1_y must be preserved for use by DrawBackdrop
 		viewpoint1_z >>= LOG_PRECISION;
+
+#ifdef SMOOTH
+		// Update camera position interpolator for track preview AFTER scaling
+		// Note: viewpoint1_y is NOT scaled (preserved for DrawBackdrop), so scale it here
+		if (GameMode == TRACK_PREVIEW)
+		{
+			CameraPositionInterpolator.Update(viewpoint1_x, viewpoint1_y >> LOG_PRECISION, viewpoint1_z);
+		}
+#endif
 
 		target_x >>= LOG_PRECISION;
 		target_y = -target_y;
@@ -1170,7 +1552,32 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 		// Set the eye point
 		D3DXVECTOR3 vEyePt( static_cast<float>(viewpoint1_x), static_cast<float>(-viewpoint1_y>>LOG_PRECISION), static_cast<float>(viewpoint1_z) );
 		// Set the lookat point
+#ifdef SMOOTH
+		D3DXVECTOR3 vLookatPt;
+		if (GameMode == TRACK_MENU)
+		{
+			vLookatPt.x = (float)target_x;
+			vLookatPt.y = (float)target_y;
+			vLookatPt.z = (float)target_z;
+		}
+		else
+		{
+			// Track preview: interpolate both camera position and lookat (camera positions already scaled)
+			// Interpolate camera position
+			long cam_x, cam_y, cam_z;
+			CameraPositionInterpolator.GetInterpolated(GameTicker.TickPercent, cam_x, cam_y, cam_z);
+			vEyePt.x = static_cast<float>(cam_x);
+			vEyePt.y = static_cast<float>(-cam_y);
+			vEyePt.z = static_cast<float>(cam_z);
+			// Interpolate lookat position
+			D3DXMATRIX carMtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
+			vLookatPt.x = carMtx._41;
+			vLookatPt.y = carMtx._42;
+			vLookatPt.z = carMtx._43;
+		}
+#else
 		D3DXVECTOR3 vLookatPt( static_cast<float>(target_x), static_cast<float>(target_y), static_cast<float>(target_z) );
+#endif
 		D3DXMatrixLookAtLH( &matView, &vEyePt, &vLookatPt, &vUpVec );
 		pd3dDevice->SetTransform( D3DTS_VIEW, &matView );
 	}
@@ -1233,12 +1640,24 @@ void CALLBACK OnFrameMove( IDirect3DDevice9 *pd3dDevice, double fTime, float fEl
 		D3DXMatrixMultiply(&matRot, &matRot, &matTemp);
 #endif
 		// Combine the rotation and translation matrices to complete the world matrix
+#ifdef SMOOTH
+		// update matrices for interpolation
+		InterpolatorView.UpdateMatrices(matTrans, matRot);
+
+		//D3DXMatrixMultiply(&matView, &matTrans, &matRot);
+		D3DMATRIX viewMtx = InterpolatorView.CreateInterpolatedMtx(GameTicker.TickPercent, true);
+#else
 		D3DXMatrixMultiply(&matView, &matTrans, &matRot);
+#endif
 #ifdef linux
 		D3DXMatrixScaling(&matTrans, +1, -1, +1);
 		D3DXMatrixMultiply(&matView, &matView, &matTrans);
 #endif
+#ifdef SMOOTH
+		pd3dDevice->SetTransform(D3DTS_VIEW, &viewMtx);
+#else
 		pd3dDevice->SetTransform( D3DTS_VIEW, &matView );
+#endif
 	}
 
 	if (!bPaused)
@@ -1317,6 +1736,10 @@ static void HandleTrackMenu( CDXUTTextHelper &txtHelper )
 		ResetPlayer();		// Also reset player to clear values if there was a previous game (CarBehaviour normally does this, but isn't called for track preview)
         GameMode = TRACK_PREVIEW;
 		bPlayerPaused = bOpponentPaused = FALSE;
+#ifdef SMOOTH
+		// Defer interpolator initialization until after opponent is positioned
+		bNeedInterpolatorInit = TRUE;
+#endif
 		keyPress = '\0';
 	}
 	
@@ -1355,6 +1778,15 @@ static void HandleTrackPreview( CDXUTTextHelper &txtHelper )
 	{
 		bNewGame = TRUE;
         GameMode = GAME_IN_PROGRESS;
+
+		// Trigger a resize message to ensure proper text positioning from the start
+		HWND hWnd = DXUTGetHWND();
+		if (hWnd)
+		{
+			RECT rect;
+			GetWindowRect(hWnd, &rect);
+			SendMessage(hWnd, WM_SIZING, WMSZ_BOTTOMRIGHT, (LPARAM)&rect);
+		}
 		// initialise game data
 		ResetLapData(OPPONENT);
 		ResetLapData(PLAYER);
@@ -1375,6 +1807,10 @@ static void HandleTrackPreview( CDXUTTextHelper &txtHelper )
 		}
 		boostUnit = 0;
 		bPlayerPaused = bOpponentPaused = FALSE;
+#ifdef SMOOTH
+		// Set flag to initialize interpolators after CarBehaviour positions the car
+		bNeedInterpolatorInit = TRUE;
+#endif
 		keyPress = '\0';
 	}
 
@@ -1427,6 +1863,10 @@ void RenderText( double fTime )
 
 	switch (GameMode)
 	{
+		case TITLE_SCREEN:
+			txtHelper.End();
+			break;
+
 		case TRACK_MENU:
 			HandleTrackMenu(txtHelper);
 			txtHelper.End();
@@ -1496,9 +1936,13 @@ void RenderText( double fTime )
 			txtHelper.DrawFormattedTextLine( L"L %s", lastLapStr );
 			
 #if defined(DEBUG) || defined(_DEBUG)
-			// FrameGap indicator - top right corner (debug only)
+			// Physics rate indicator - top right corner
 			txtHelper.SetInsertionPos( static_cast<int>((pd3dsdBackBuffer->Width - 80 * textScale)), static_cast<int>(10 * textScale) );
+#ifdef SMOOTH
+			txtHelper.DrawFormattedTextLine( L"Hz:%.1f", smoothPhysicsRate );
+#else
 			txtHelper.DrawFormattedTextLine( L"FG:%d", frameGap );
+#endif
 #endif
 
 			txtHelper.End();
@@ -1665,19 +2109,78 @@ void CALLBACK OnFrameRender( IDirect3DDevice9 *pd3dDevice, double fTime, float f
 //    V( pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_ARGB(0, 45, 50, 170), 1.0f, 0) );
 
     // Clear the zbuffer
+#ifdef SMOOTH
+	V(pd3dDevice->Clear(0, NULL, D3DCLEAR_ZBUFFER | D3DCLEAR_TARGET, 0xff444488, 1.0f, 0));
+#else
     V( pd3dDevice->Clear(0, NULL, D3DCLEAR_ZBUFFER, 0, 1.0f, 0) );
-
+#endif
     // Render the scene
     if ( SUCCEEDED( pd3dDevice->BeginScene() ) )
     {
+		// Title screen rendering - draw fullscreen image and text, then return
+		if (GameMode == TITLE_SCREEN)
+		{
+			if (g_pTitleScreen && g_pSprite)
+			{
+				// Get back buffer dimensions
+				const D3DSURFACE_DESC *pBackBuffer = DXUTGetBackBufferSurfaceDesc();
+				UINT screenWidth = pBackBuffer->Width;
+				UINT screenHeight = pBackBuffer->Height;
+
+				// Get texture dimensions
+				D3DSURFACE_DESC texDesc;
+				g_pTitleScreen->GetLevelDesc(0, &texDesc);
+
+				// Calculate scale to fill screen while maintaining aspect ratio
+				float scaleX = static_cast<float>(screenWidth) / static_cast<float>(texDesc.Width);
+				float scaleY = static_cast<float>(screenHeight) / static_cast<float>(texDesc.Height);
+
+				D3DXMATRIX matScale;
+				D3DXMatrixScaling(&matScale, scaleX, scaleY, 1.0f);
+
+				g_pSprite->Begin(D3DXSPRITE_ALPHABLEND);
+				g_pSprite->SetTransform(&matScale);
+				g_pSprite->Draw(g_pTitleScreen, NULL, NULL, NULL, 0xFFFFFFFF);
+				g_pSprite->End();
+
+				// Draw "Press any key to continue" text
+				float textScale = GetTextScale();
+				CDXUTTextHelper txtHelper(g_pFontLarge, g_pSprite, static_cast<int>(25 * textScale));
+				txtHelper.Begin();
+				txtHelper.SetForegroundColor(D3DXCOLOR(1.0f, 1.0f, 1.0f, 1.0f));
+				// Position text near the bottom center
+				RECT rc;
+				SetRect(&rc, 0, static_cast<int>(screenHeight * 0.75f), screenWidth, screenHeight);
+				g_pFontLarge->DrawText(g_pSprite, L"Press any key to continue", -1, &rc, DT_CENTER | DT_NOCLIP, D3DXCOLOR(1.0f, 1.0f, 1.0f, 1.0f));
+				txtHelper.End();
+			}
+
+			pd3dDevice->EndScene();
+			return;
+		}
+
 		// Disable Z buffer and polygon culling, ready for DrawBackdrop()
 		pd3dDevice->SetRenderState( D3DRS_ZENABLE, FALSE );
 		pd3dDevice->SetRenderState( D3DRS_CULLMODE, D3DCULL_NONE );
 
 		// Draw Backdrop
+#ifdef SMOOTH
+		long smooth_x_angle, smooth_y_angle, smooth_z_angle;
+		BackdropAngleInterpolator.GetInterpolatedAngles(GameTicker.TickPercent, smooth_x_angle, smooth_y_angle, smooth_z_angle);
+		DrawBackdrop(viewpoint1_y, smooth_x_angle, smooth_y_angle, smooth_z_angle);
+#else
 		DrawBackdrop(viewpoint1_y, viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+#endif
 
 //		SetupLights(pd3dDevice);
+
+#ifdef SMOOTH
+		// Update interpolated shadow before drawing track
+		if (GameMode == GAME_IN_PROGRESS)
+		{
+			UpdateInterpolatedShadow(GameTicker.TickPercent);
+		}
+#endif
 
 		// Draw Track
 		pd3dDevice->SetTransform( D3DTS_WORLD, &matWorldTrack );
@@ -1688,22 +2191,38 @@ void CALLBACK OnFrameRender( IDirect3DDevice9 *pd3dDevice, double fTime, float f
 			case TRACK_MENU:
 				break;
 
-			case TRACK_PREVIEW:
-				// Draw Opponent's Car
-				pd3dDevice->SetTransform( D3DTS_WORLD, &matWorldOpponentsCar );
-				DrawCar(pd3dDevice);
-				break;
-
-			case GAME_IN_PROGRESS:
+		case TRACK_PREVIEW:
+		{
+			// Draw Opponent's Car
+#ifdef SMOOTH
+			D3DMATRIX mtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
+			pd3dDevice->SetTransform(D3DTS_WORLD, &mtx);
+#else
+			pd3dDevice->SetTransform(D3DTS_WORLD, &matWorldOpponentsCar);
+#endif
+			DrawCar(pd3dDevice);
+		}
+			break;			case GAME_IN_PROGRESS:
 			case GAME_OVER:
+			{
 				// Draw Opponent's Car
-				pd3dDevice->SetTransform( D3DTS_WORLD, &matWorldOpponentsCar );
+#ifdef SMOOTH
+				D3DMATRIX mtx = InterpolatorCarOpponent.CreateInterpolatedMtx(GameTicker.TickPercent);
+				pd3dDevice->SetTransform(D3DTS_WORLD, &mtx);
+#else
+				pd3dDevice->SetTransform(D3DTS_WORLD, &matWorldOpponentsCar);
+#endif
 				DrawCar(pd3dDevice);
-
+			}
 				if (bOutsideView)
 				{
 					// Draw Player1's Car
+#ifdef SMOOTH
+					D3DMATRIX mtx = InterpolatorCarOwn.CreateInterpolatedMtx(GameTicker.TickPercent);
+					pd3dDevice->SetTransform(D3DTS_WORLD, &mtx);
+#else
 					pd3dDevice->SetTransform( D3DTS_WORLD, &matWorldCar );
+#endif
 					DrawCar(pd3dDevice);
 				}
 				else
@@ -1805,6 +2324,13 @@ void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUse
 {
     if (bKeyDown)
     {
+		// Handle title screen - any key proceeds to track menu
+		if (GameMode == TITLE_SCREEN)
+		{
+			GameMode = TRACK_MENU;
+			return;
+		}
+
 		keyPress = nChar;
         switch(nChar)
         {
@@ -1836,11 +2362,31 @@ void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUse
 				break;
 
 			case VK_F9:
-				if (frameGap > 1) frameGap--;
-				break;
+#ifdef SMOOTH
+				// In SMOOTH mode: increase physics rate (faster gameplay)
+				if (smoothPhysicsRate < 15.0f) {
+					smoothPhysicsRate += 1.0f;
+					GameTicker.SetTargetFPS(smoothPhysicsRate);
+				}
+#else
+			// In classic mode: decrease frameGap (faster gameplay)
+			if (frameGap > 1) {
+				frameGap--;
+			}
+#endif
+			break;
 
 			case VK_F10:
+#ifdef SMOOTH
+				// In SMOOTH mode: decrease physics rate (slower gameplay)
+				if (smoothPhysicsRate > 5.0f) {
+					smoothPhysicsRate -= 1.0f;
+					GameTicker.SetTargetFPS(smoothPhysicsRate);
+				}
+#else
+				// In classic mode: increase frameGap (slower gameplay)
 				frameGap++;
+#endif
 				break;
 
 #if defined(DEBUG) || defined(_DEBUG)
@@ -1848,11 +2394,11 @@ void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUse
 				bOutsideView = !bOutsideView;
 				break;
 #endif
+
 			case 'M':
 				if (GameMode != TRACK_MENU)
 				{
 					GameMode = TRACK_MENU;
-
 					opponentsID = NO_OPPONENT;
 
 					// Reset pause state when returning to menu
@@ -1862,6 +2408,14 @@ void CALLBACK KeyboardProc( UINT nChar, bool bKeyDown, bool bAltDown, void *pUse
 
 					// reset all animated objects
 					ResetDrawBridge();
+
+#ifdef SMOOTH
+					// Reset interpolators when returning to menu to prevent flash on next game start
+					CalcTrackMenuViewpoint();
+					InitializeBackdropInterpolator(viewpoint1_x_angle, viewpoint1_y_angle, viewpoint1_z_angle);
+					InitializeViewMatrixInterpolator();
+					ResetOpponentCarInterpolator();
+#endif
 				}
 				break;
 
@@ -1962,6 +2516,7 @@ void CALLBACK OnLostDevice( void *pUserContext )
 	FreeCockpitVertexBuffer();
 
 	if (g_pAtlas) g_pAtlas->Release(), g_pAtlas = NULL;
+	if (g_pTitleScreen) g_pTitleScreen->Release(), g_pTitleScreen = NULL;
 }
 
 
